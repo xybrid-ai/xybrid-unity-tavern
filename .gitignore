@@ -1,0 +1,29 @@
+# ============================================
+# Night Tavern - GitHub Distribution Setup
+# ============================================
+# This repo only tracks documentation files.
+# Unity project files are distributed via GitHub Releases.
+# Full project is managed in Unity Cloud.
+# ============================================
+
+# Ignore EVERYTHING by default
+*
+
+# ============================================
+# KEEP: Documentation files for GitHub
+# ============================================
+!.gitignore
+!README.md
+!LICENSE
+!CHANGELOG.md
+
+# Keep docs folder and its contents
+!docs/
+!docs/**
+
+# ============================================
+# Ignore system files even in kept folders
+# ============================================
+.DS_Store
+Thumbs.db
+*.log
