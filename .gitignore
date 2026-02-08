@@ -22,6 +22,12 @@
 !docs/**
 
 # ============================================
+# Ignore build artifacts and local scripts
+# ============================================
+releases/
+scripts/
+
+# ============================================
 # Ignore system files even in kept folders
 # ============================================
 .DS_Store
