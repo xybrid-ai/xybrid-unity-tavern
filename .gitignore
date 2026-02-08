@@ -33,3 +33,9 @@ scripts/
 .DS_Store
 Thumbs.db
 *.log
+
+# Keep Scripts folder and its contents
+!Assets/Scripts/
+!Assets/Scripts/**
+!Assets/Scripts/Xybrid/
+!Assets/Scripts/Xybrid/**
