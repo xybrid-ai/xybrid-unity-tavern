@@ -39,3 +39,6 @@ Thumbs.db
 !Assets/Scripts/**
 !Assets/Scripts/Xybrid/
 !Assets/Scripts/Xybrid/**
+
+# Xybrid files
+*.xyb
