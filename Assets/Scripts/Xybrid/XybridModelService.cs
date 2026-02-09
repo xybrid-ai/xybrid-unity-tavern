@@ -15,7 +15,7 @@ namespace Tavern.Dialogue
     {
         public static XybridModelService Instance { get; private set; }
 
-        [SerializeField] private string _modelId = "phi-3-mini";
+        [SerializeField] private string _modelId;
         [SerializeField] private bool _persistAcrossScenes = true;
 
         private Model _model;
@@ -49,6 +49,9 @@ namespace Tavern.Dialogue
         {
             if (_isReady) return;
 
+            if (string.IsNullOrWhiteSpace(_modelId))
+                throw new InvalidOperationException("Model ID is not set. Configure it in the Inspector on XybridModelService.");
+
             await Task.Run(() =>
             {
                 XybridClient.Initialize();
@@ -57,15 +60,19 @@ namespace Tavern.Dialogue
 
             _sdkVersion = XybridClient.Version;
             _isReady = true;
-            Debug.Log($"[XybridModelService] Ready: model={_model.ModelId}, SDK v{_sdkVersion}, streaming={_model.SupportsTokenStreaming}");
+            Debug.Log($"[XybridModelService] Ready: model={_model.ModelId}, SDK v{_sdkVersion}");
         }
 
         /// <summary>
-        /// Run non-streaming inference. Returns the full response when complete.
-        /// Does NOT push to context — caller's responsibility.
-        /// Does NOT clean response — provider's concern.
+        /// Run inference with a fully-built prompt string.
+        /// Uses model.Run(envelope) without native ConversationContext.
+        /// The caller is responsible for including system prompt and history in the prompt.
         /// </summary>
-        public async Task<DialogueResponse> RunInferenceAsync(string userText, ConversationContext context)
+        /// <remarks>
+        /// Native ConversationContext is disabled due to a crash in xybrid_model_run_with_context.
+        /// TODO: Re-enable once the xybrid-ffi context bug is fixed.
+        /// </remarks>
+        public async Task<DialogueResponse> RunInferenceAsync(string fullPrompt)
         {
             if (!_isReady)
                 return DialogueResponse.FromError("XybridModelService not ready");
@@ -79,8 +86,8 @@ namespace Tavern.Dialogue
 
                 await Task.Run(() =>
                 {
-                    using (var envelope = Envelope.Text(userText, MessageRole.User))
-                    using (var inferenceResult = _model.Run(envelope, context))
+                    using (var envelope = Envelope.Text(fullPrompt))
+                    using (var inferenceResult = _model.Run(envelope))
                     {
                         if (inferenceResult.Success)
                         {
@@ -118,15 +125,10 @@ namespace Tavern.Dialogue
         }
 
         /// <summary>
-        /// Run streaming inference. The onToken callback is invoked per token on a background thread.
-        /// Returns the final DialogueResponse when generation is complete.
-        /// Does NOT push to context — caller's responsibility.
-        /// Does NOT clean response — provider's concern.
+        /// Run streaming inference with a fully-built prompt string.
+        /// Uses model.RunStreaming(envelope, onToken) — simple, no ConversationContext.
         /// </summary>
-        public async Task<DialogueResponse> RunStreamingInferenceAsync(
-            string userText,
-            ConversationContext context,
-            Action<StreamToken> onToken)
+        public async Task<DialogueResponse> RunStreamingAsync(string fullPrompt, Action<string> onToken)
         {
             if (!_isReady)
                 return DialogueResponse.FromError("XybridModelService not ready");
@@ -140,8 +142,11 @@ namespace Tavern.Dialogue
 
                 await Task.Run(() =>
                 {
-                    using (var envelope = Envelope.Text(userText, MessageRole.User))
-                    using (var inferenceResult = _model.RunStreaming(envelope, context, onToken))
+                    using (var envelope = Envelope.Text(fullPrompt))
+                    using (var inferenceResult = _model.RunStreaming(envelope, token =>
+                    {
+                        onToken?.Invoke(token.Token);
+                    }))
                     {
                         if (inferenceResult.Success)
                         {

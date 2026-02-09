@@ -130,10 +130,20 @@ public class DialogueManagerV2 : MonoBehaviour
         if (sendButton != null)
         {
             sendButton.onClick.AddListener(OnSendClicked);
+            Debug.Log("[DialogueManagerV2] SendButton listener registered");
+        }
+        else
+        {
+            Debug.LogWarning("[DialogueManagerV2] sendButton is null — not wired in Inspector?");
         }
         if (playerInputField != null)
         {
             playerInputField.onEndEdit.AddListener(OnInputEndEdit);
+            Debug.Log("[DialogueManagerV2] PlayerInputField listener registered");
+        }
+        else
+        {
+            Debug.LogWarning("[DialogueManagerV2] playerInputField is null — not wired in Inspector?");
         }
 
         UpdateInputMode();
@@ -193,34 +203,50 @@ public class DialogueManagerV2 : MonoBehaviour
         // Show thinking indicator while loading
         SetThinking(true);
 
-        // Get greeting — streaming or non-streaming
         DialogueResponse response;
-        if (_provider.SupportsStreaming)
+        Debug.Log($"[DialogueManagerV2] SupportsStreaming={_provider.SupportsStreaming}, SupportsFreeInput={_provider.SupportsFreeInput}");
+        try
         {
-            // Start streaming typewriter before awaiting
-            ClearTokenQueue();
-            _streamingComplete = false;
-            _typewriterCoroutine = StartCoroutine(StreamingTypewriterEffect());
+            // Get greeting — streaming or non-streaming
+            if (_provider.SupportsStreaming)
+            {
+                Debug.Log("[DialogueManagerV2] Taking STREAMING path for greeting");
+                ClearTokenQueue();
+                _streamingComplete = false;
+                _typewriterCoroutine = StartCoroutine(StreamingTypewriterEffect());
 
-            response = await _provider.GetGreetingStreamingAsync(npc, OnStreamToken);
-            _streamingComplete = true;
+                response = await _provider.GetGreetingStreamingAsync(npc, OnStreamToken);
+                _streamingComplete = true;
+            }
+            else
+            {
+                Debug.Log("[DialogueManagerV2] Taking NON-STREAMING path for greeting");
+                response = await _provider.GetGreetingAsync(npc);
+                // response = DialogueResponse.FromText("[DEBUG] Inference skipped — testing path selection");
+            }
         }
-        else
+        catch (System.Exception ex)
         {
-            response = await _provider.GetGreetingAsync(npc);
+            Debug.LogError($"[DialogueManagerV2] Greeting failed: {ex.GetType().Name}: {ex.Message}");
+            _streamingComplete = true; // Stop streaming coroutine if running
+            response = DialogueResponse.FromError(ex.Message);
         }
 
         SetThinking(false);
+
+        if (!response.Success)
+        {
+            Debug.LogWarning($"[DialogueManagerV2] Inference error: {response.Text}");
+            ShowNPCText("*The NPC stares blankly...*");
+            return;
+        }
+
         UpdateDemoOverlay(response);
 
         if (!_provider.SupportsStreaming)
         {
-            // Non-streaming: show full text with typewriter
             ShowNPCText(response.Text);
         }
-        // Streaming: typewriter coroutine is already displaying tokens.
-        // The await above blocks until inference is done, so _streamingComplete is set.
-        // The coroutine will drain any remaining tokens in the queue on its own.
 
         _conversationHistory.Add($"{npc.npcName}: {response.Text}");
 
@@ -241,10 +267,23 @@ public class DialogueManagerV2 : MonoBehaviour
 
     private void OnSendClicked()
     {
-        if (_isProcessing || string.IsNullOrWhiteSpace(playerInputField.text)) return;
+        Debug.Log($"[DialogueManagerV2] SendButton clicked — isProcessing={_isProcessing}, inputText=\"{playerInputField?.text}\"");
+
+        if (_isProcessing)
+        {
+            Debug.LogWarning("[DialogueManagerV2] Send blocked: already processing");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(playerInputField.text))
+        {
+            Debug.LogWarning("[DialogueManagerV2] Send blocked: input is empty");
+            return;
+        }
 
         string input = playerInputField.text.Trim();
         playerInputField.text = "";
+        playerInputField.ActivateInputField();
+        Debug.Log($"[DialogueManagerV2] Sending player input: \"{input}\"");
         _ = ProcessPlayerInput(input, -1);
     }
 
@@ -254,12 +293,14 @@ public class DialogueManagerV2 : MonoBehaviour
         if (Keyboard.current != null &&
             (Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.numpadEnterKey.wasPressedThisFrame))
         {
+            Debug.Log("[DialogueManagerV2] Enter key pressed — forwarding to OnSendClicked");
             OnSendClicked();
         }
     }
 
     private async System.Threading.Tasks.Task ProcessPlayerInput(string playerInput, int optionIndex)
     {
+        Debug.Log($"[DialogueManagerV2] ProcessPlayerInput — input=\"{playerInput}\", optionIndex={optionIndex}");
         _isProcessing = true;
         _conversationHistory.Add($"Player: {playerInput}");
 
@@ -268,47 +309,64 @@ public class DialogueManagerV2 : MonoBehaviour
 
         DialogueResponse response;
 
-        if (_provider.SupportsFreeInput)
+        try
         {
-            if (_provider.SupportsStreaming)
+            if (_provider.SupportsFreeInput)
             {
-                // Streaming AI dialogue
-                ClearTokenQueue();
-                _streamingComplete = false;
-                _typewriterCoroutine = StartCoroutine(StreamingTypewriterEffect());
+                if (_provider.SupportsStreaming)
+                {
+                    ClearTokenQueue();
+                    _streamingComplete = false;
+                    _typewriterCoroutine = StartCoroutine(StreamingTypewriterEffect());
 
-                response = await _provider.GetResponseStreamingAsync(
-                    _currentNPC,
-                    playerInput,
-                    _conversationHistory.ToArray(),
-                    OnStreamToken);
-                _streamingComplete = true;
+                    response = await _provider.GetResponseStreamingAsync(
+                        _currentNPC,
+                        playerInput,
+                        _conversationHistory.ToArray(),
+                        OnStreamToken);
+                    _streamingComplete = true;
+                }
+                else
+                {
+                    response = await _provider.GetResponseAsync(
+                        _currentNPC,
+                        playerInput,
+                        _conversationHistory.ToArray());
+                }
             }
             else
             {
-                // Non-streaming AI dialogue
-                response = await _provider.GetResponseAsync(
-                    _currentNPC,
-                    playerInput,
-                    _conversationHistory.ToArray());
+                // Scripted dialogue — get predetermined response
+                var exchanges = _currentNPC.dialogueData.exchanges;
+                if (_currentExchangeIndex < exchanges.Length && optionIndex >= 0)
+                {
+                    string npcResponse = exchanges[_currentExchangeIndex].npcResponses[optionIndex];
+                    response = DialogueResponse.FromText(npcResponse);
+                }
+                else
+                {
+                    response = DialogueResponse.FromText("...");
+                }
             }
         }
-        else
+        catch (System.Exception ex)
         {
-            // Scripted dialogue — get predetermined response
-            var exchanges = _currentNPC.dialogueData.exchanges;
-            if (_currentExchangeIndex < exchanges.Length && optionIndex >= 0)
-            {
-                string npcResponse = exchanges[_currentExchangeIndex].npcResponses[optionIndex];
-                response = DialogueResponse.FromText(npcResponse);
-            }
-            else
-            {
-                response = DialogueResponse.FromText("...");
-            }
+            Debug.LogError($"[DialogueManagerV2] Response failed: {ex.GetType().Name}: {ex.Message}");
+            _streamingComplete = true;
+            response = DialogueResponse.FromError(ex.Message);
         }
 
         SetThinking(false);
+
+        if (!response.Success)
+        {
+            Debug.LogWarning($"[DialogueManagerV2] Inference error: {response.Text}");
+            ShowNPCText("*The NPC seems lost in thought...*");
+            _isProcessing = false;
+            await ShowPlayerInput();
+            return;
+        }
+
         UpdateDemoOverlay(response);
 
         if (!_provider.SupportsStreaming)
@@ -614,7 +672,6 @@ public class DialogueManagerV2 : MonoBehaviour
 
     private void OnDestroy()
     {
-        _xybridProvider?.Dispose();
     }
 
     private void Update()
