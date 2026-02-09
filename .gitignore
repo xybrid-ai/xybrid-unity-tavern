@@ -35,10 +35,9 @@ Thumbs.db
 *.log
 
 # Keep Scripts folder and its contents
+!Assets/
 !Assets/Scripts/
 !Assets/Scripts/**
-!Assets/Scripts/Xybrid/
-!Assets/Scripts/Xybrid/**
 
 # Xybrid files
 *.xyb
