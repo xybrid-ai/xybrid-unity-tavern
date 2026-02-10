@@ -38,6 +38,9 @@ public class DialogueManagerV2 : MonoBehaviour
     [SerializeField] private TMP_Text modelText;
     [SerializeField] private TMP_Text locationText;
 
+    [Header("Debug")]
+    [SerializeField] private NPCDebugPanel npcDebugPanel;
+
     [Header("Typewriter Effect")]
     [SerializeField] private float typeSpeed = 0.03f;
     [SerializeField] private AudioSource typingAudioSource;
@@ -170,6 +173,9 @@ public class DialogueManagerV2 : MonoBehaviour
 
         ShowPanel();
         npcNameText.text = npc.npcName;
+
+        if (npcDebugPanel != null)
+            npcDebugPanel.Show(npc);
 
         npc.GetComponent<NPCLookAt>()?.StartLookingAtPlayer();
 
@@ -560,6 +566,9 @@ public class DialogueManagerV2 : MonoBehaviour
         if (_currentNPC != null && _xybridProvider != null)
             _xybridProvider.ClearNPCContext(_currentNPC.npcName);
 
+        if (npcDebugPanel != null)
+            npcDebugPanel.Hide();
+
         HidePanel();
         _isDialogueOpen = false;
         _currentNPC = null;
@@ -621,6 +630,9 @@ public class DialogueManagerV2 : MonoBehaviour
 
         if (Keyboard.current != null && Keyboard.current.f1Key.wasPressedThisFrame)
             SetUseAIDialogue(!useAIDialogue);
+
+        if (Keyboard.current != null && Keyboard.current.backquoteKey.wasPressedThisFrame && npcDebugPanel != null)
+            npcDebugPanel.Toggle();
 
         // Submit on Enter while input field is focused (replaces onEndEdit to avoid
         // spurious inference triggers on focus loss)
