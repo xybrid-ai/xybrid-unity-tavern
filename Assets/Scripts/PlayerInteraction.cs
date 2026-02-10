@@ -18,6 +18,7 @@ public class PlayerInteraction : MonoBehaviour
     private Camera playerCamera;
     private NPCIdentity currentNPC;
     private InputAction interactAction;
+    private bool _inDialogue;
 
     private void Awake()
     {
@@ -44,6 +45,8 @@ public class PlayerInteraction : MonoBehaviour
 
     private void Update()
     {
+        if (_inDialogue) return;
+
         CheckForNPC();
 
         if (currentNPC != null && interactAction.WasPressedThisFrame())
@@ -77,6 +80,12 @@ public class PlayerInteraction : MonoBehaviour
 
     private void StartDialogue()
     {
+        _inDialogue = true;
+        interactAction.Disable();
+
+        if (interactionPrompt != null)
+            interactionPrompt.SetActive(false);
+
         // Try V2 first, fall back to V1
         DialogueManagerV2 dialogueManagerV2 = FindFirstObjectByType<DialogueManagerV2>();
         if (dialogueManagerV2 != null)
@@ -114,6 +123,9 @@ public class PlayerInteraction : MonoBehaviour
     /// </summary>
     public void EndDialogue()
     {
+        _inDialogue = false;
+        interactAction.Enable();
+
         PlayerMovement movement = GetComponent<PlayerMovement>();
         if (movement != null)
             movement.canMove = true;

@@ -25,9 +25,12 @@ public class DialogueManagerV2 : MonoBehaviour
     [SerializeField] private Button[] optionButtons;
     [SerializeField] private TMP_Text[] optionButtonTexts;
     [SerializeField] private Button closeButton;
-    [SerializeField] private TMP_InputField playerInputField; // For free-form AI input
-    [SerializeField] private Button sendButton;           // Submit free-form input
-    [SerializeField] private GameObject thinkingIndicator; // "NPC is thinking..." UI
+    [SerializeField] private TMP_InputField playerInputField;
+    [SerializeField] private Button sendButton;
+    [SerializeField] private GameObject thinkingIndicator;
+
+    [Header("Conversation History")]
+    [SerializeField] private ConversationHistoryUI conversationHistoryUI;
 
     [Header("Demo Overlay")]
     [SerializeField] private GameObject demoOverlay;
@@ -35,12 +38,18 @@ public class DialogueManagerV2 : MonoBehaviour
     [SerializeField] private TMP_Text modelText;
     [SerializeField] private TMP_Text locationText;
 
+    [Header("Debug")]
+    [SerializeField] private NPCDebugPanel npcDebugPanel;
+
     [Header("Typewriter Effect")]
     [SerializeField] private float typeSpeed = 0.03f;
     [SerializeField] private AudioSource typingAudioSource;
-    [SerializeField] private AudioClip[] typingSounds;      // Multiple clips for variety
+    [SerializeField] private AudioClip[] typingSounds;
     [SerializeField] private float typingVolume = 0.3f;
-    [SerializeField] private float typingPitchVariation = 0.1f;  // Slight pitch randomization
+    [SerializeField] private float typingPitchVariation = 0.1f;
+
+    [Header("Panel Animation")]
+    [SerializeField] private float panelFadeDuration = 0.2f;
 
     // Providers
     private IDialogueProvider _provider;
@@ -54,14 +63,12 @@ public class DialogueManagerV2 : MonoBehaviour
     private Coroutine _panelFadeCoroutine;
     private List<string> _conversationHistory = new List<string>();
     private bool _isProcessing;
+    private bool _isDialogueOpen;
     private CanvasGroup _panelCanvasGroup;
 
     // Streaming token queue — filled by background thread, consumed by typewriter coroutine
     private readonly ConcurrentQueue<string> _tokenQueue = new ConcurrentQueue<string>();
     private volatile bool _streamingComplete;
-
-    [Header("Panel Animation")]
-    [SerializeField] private float panelFadeDuration = 0.2f;
 
     private async void Start()
     {
@@ -78,30 +85,23 @@ public class DialogueManagerV2 : MonoBehaviour
         {
             try
             {
-                // Ensure the model service is ready
                 var service = XybridModelService.Instance;
                 if (service == null)
-                {
                     throw new System.InvalidOperationException(
-                        "XybridModelService.Instance is null. Add a GameObject with XybridModelService to the scene.");
-                }
+                        "XybridModelService not found in scene. Add it to a GameObject.");
+
                 await service.InitializeAsync();
 
-                _xybridProvider = new XybridDialogueProvider();
+                _xybridProvider = new XybridDialogueProvider(service);
                 if (worldLore != null)
-                {
                     _xybridProvider.SetWorldLore(worldLore);
-                }
 
                 _provider = _xybridProvider;
-                Debug.Log("[DialogueManager] Using Xybrid AI dialogue");
+                Debug.Log($"[DialogueManager] Using Xybrid AI dialogue ({service.ModelId})");
             }
             catch (System.Exception ex)
             {
-                Debug.LogError($"[DialogueManager] Xybrid init failed: {ex.GetType().Name}: {ex.Message}");
-                Debug.LogError($"[DialogueManager] Stack: {ex.StackTrace}");
-                if (ex.InnerException != null)
-                    Debug.LogError($"[DialogueManager] Inner: {ex.InnerException.Message}");
+                Debug.LogError($"[DialogueManager] Xybrid init failed: {ex.Message}");
                 Debug.LogWarning("[DialogueManager] Falling back to scripted dialogue");
                 _provider = _scriptedProvider;
             }
@@ -119,39 +119,21 @@ public class DialogueManagerV2 : MonoBehaviour
 
         closeButton.onClick.AddListener(EndDialogue);
 
-        // Option buttons (for scripted dialogue)
         for (int i = 0; i < optionButtons.Length; i++)
         {
             int index = i;
             optionButtons[i].onClick.AddListener(() => OnOptionSelected(index));
         }
 
-        // Free-form input (for AI dialogue)
         if (sendButton != null)
-        {
             sendButton.onClick.AddListener(OnSendClicked);
-            Debug.Log("[DialogueManagerV2] SendButton listener registered");
-        }
-        else
-        {
-            Debug.LogWarning("[DialogueManagerV2] sendButton is null — not wired in Inspector?");
-        }
-        if (playerInputField != null)
-        {
-            playerInputField.onEndEdit.AddListener(OnInputEndEdit);
-            Debug.Log("[DialogueManagerV2] PlayerInputField listener registered");
-        }
-        else
-        {
-            Debug.LogWarning("[DialogueManagerV2] playerInputField is null — not wired in Inspector?");
-        }
+
+        // No onEndEdit listener — Enter key is handled in Update() to avoid
+        // spurious triggers on focus loss.
 
         UpdateInputMode();
     }
 
-    /// <summary>
-    /// Toggle between scripted and AI dialogue at runtime.
-    /// </summary>
     public void SetUseAIDialogue(bool useAI)
     {
         useAIDialogue = useAI;
@@ -164,53 +146,49 @@ public class DialogueManagerV2 : MonoBehaviour
     {
         bool freeInput = _provider?.SupportsFreeInput ?? false;
 
-        // Show/hide appropriate input UI
         if (playerInputField != null)
             playerInputField.gameObject.SetActive(freeInput);
         if (sendButton != null)
             sendButton.gameObject.SetActive(freeInput);
 
         foreach (var btn in optionButtons)
-        {
             btn.gameObject.SetActive(!freeInput);
-        }
     }
 
-    /// <summary>
-    /// Called by PlayerInteraction when player interacts with an NPC.
-    /// </summary>
+    // ================================================================
+    // Dialogue flow
+    // ================================================================
+
     public async void StartDialogue(NPCIdentity npc)
     {
-        Debug.Log($"[DialogueManagerV2] StartDialogue called for {npc.npcName}");
-        Debug.Log($"[DialogueManagerV2] Provider: {_provider?.ProviderName ?? "null"}");
-
-        if (_isProcessing) return;
+        if (_isProcessing || _isDialogueOpen) return;
+        _isDialogueOpen = true;
 
         _currentNPC = npc;
         _currentExchangeIndex = 0;
         _conversationHistory.Clear();
 
+        if (conversationHistoryUI != null)
+            conversationHistoryUI.Clear();
+
         ShowPanel();
         npcNameText.text = npc.npcName;
 
-        // NPC looks at player
+        if (npcDebugPanel != null)
+            npcDebugPanel.Show(npc);
+
         npc.GetComponent<NPCLookAt>()?.StartLookingAtPlayer();
 
-        // Camera focuses on NPC
         var cameraFocus = FindFirstObjectByType<DialogueCameraFocus>();
         cameraFocus?.FocusOn(npc.transform);
 
-        // Show thinking indicator while loading
         SetThinking(true);
 
         DialogueResponse response;
-        Debug.Log($"[DialogueManagerV2] SupportsStreaming={_provider.SupportsStreaming}, SupportsFreeInput={_provider.SupportsFreeInput}");
         try
         {
-            // Get greeting — streaming or non-streaming
             if (_provider.SupportsStreaming)
             {
-                Debug.Log("[DialogueManagerV2] Taking STREAMING path for greeting");
                 ClearTokenQueue();
                 _streamingComplete = false;
                 _typewriterCoroutine = StartCoroutine(StreamingTypewriterEffect());
@@ -220,15 +198,13 @@ public class DialogueManagerV2 : MonoBehaviour
             }
             else
             {
-                Debug.Log("[DialogueManagerV2] Taking NON-STREAMING path for greeting");
                 response = await _provider.GetGreetingAsync(npc);
-                // response = DialogueResponse.FromText("[DEBUG] Inference skipped — testing path selection");
             }
         }
         catch (System.Exception ex)
         {
-            Debug.LogError($"[DialogueManagerV2] Greeting failed: {ex.GetType().Name}: {ex.Message}");
-            _streamingComplete = true; // Stop streaming coroutine if running
+            Debug.LogError($"[DialogueManager] Greeting failed: {ex.Message}");
+            _streamingComplete = true;
             response = DialogueResponse.FromError(ex.Message);
         }
 
@@ -236,7 +212,6 @@ public class DialogueManagerV2 : MonoBehaviour
 
         if (!response.Success)
         {
-            Debug.LogWarning($"[DialogueManagerV2] Inference error: {response.Text}");
             ShowNPCText("*The NPC stares blankly...*");
             return;
         }
@@ -244,13 +219,13 @@ public class DialogueManagerV2 : MonoBehaviour
         UpdateDemoOverlay(response);
 
         if (!_provider.SupportsStreaming)
-        {
             ShowNPCText(response.Text);
-        }
 
         _conversationHistory.Add($"{npc.npcName}: {response.Text}");
 
-        // Show options or input field
+        if (conversationHistoryUI != null)
+            conversationHistoryUI.AddMessage(npc.npcName, response.Text, isPlayer: false);
+
         await ShowPlayerInput();
     }
 
@@ -267,42 +242,25 @@ public class DialogueManagerV2 : MonoBehaviour
 
     private void OnSendClicked()
     {
-        Debug.Log($"[DialogueManagerV2] SendButton clicked — isProcessing={_isProcessing}, inputText=\"{playerInputField?.text}\"");
-
-        if (_isProcessing)
-        {
-            Debug.LogWarning("[DialogueManagerV2] Send blocked: already processing");
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(playerInputField.text))
-        {
-            Debug.LogWarning("[DialogueManagerV2] Send blocked: input is empty");
-            return;
-        }
+        if (_isProcessing) return;
+        if (playerInputField == null) return;
+        if (string.IsNullOrWhiteSpace(playerInputField.text)) return;
 
         string input = playerInputField.text.Trim();
-        playerInputField.text = "";
-        playerInputField.ActivateInputField();
-        Debug.Log($"[DialogueManagerV2] Sending player input: \"{input}\"");
-        _ = ProcessPlayerInput(input, -1);
-    }
 
-    private void OnInputEndEdit(string text)
-    {
-        // Submit on Enter key
-        if (Keyboard.current != null &&
-            (Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.numpadEnterKey.wasPressedThisFrame))
-        {
-            Debug.Log("[DialogueManagerV2] Enter key pressed — forwarding to OnSendClicked");
-            OnSendClicked();
-        }
+        // Freeze: keep sent text visible but disable interaction
+        SetInputLocked(true);
+
+        _ = ProcessPlayerInput(input, -1);
     }
 
     private async System.Threading.Tasks.Task ProcessPlayerInput(string playerInput, int optionIndex)
     {
-        Debug.Log($"[DialogueManagerV2] ProcessPlayerInput — input=\"{playerInput}\", optionIndex={optionIndex}");
         _isProcessing = true;
         _conversationHistory.Add($"Player: {playerInput}");
+
+        if (conversationHistoryUI != null)
+            conversationHistoryUI.AddMessage("You", playerInput, isPlayer: true);
 
         SetThinking(true);
         HideOptions();
@@ -336,7 +294,6 @@ public class DialogueManagerV2 : MonoBehaviour
             }
             else
             {
-                // Scripted dialogue — get predetermined response
                 var exchanges = _currentNPC.dialogueData.exchanges;
                 if (_currentExchangeIndex < exchanges.Length && optionIndex >= 0)
                 {
@@ -351,7 +308,7 @@ public class DialogueManagerV2 : MonoBehaviour
         }
         catch (System.Exception ex)
         {
-            Debug.LogError($"[DialogueManagerV2] Response failed: {ex.GetType().Name}: {ex.Message}");
+            Debug.LogError($"[DialogueManager] Response failed: {ex.Message}");
             _streamingComplete = true;
             response = DialogueResponse.FromError(ex.Message);
         }
@@ -360,9 +317,9 @@ public class DialogueManagerV2 : MonoBehaviour
 
         if (!response.Success)
         {
-            Debug.LogWarning($"[DialogueManagerV2] Inference error: {response.Text}");
             ShowNPCText("*The NPC seems lost in thought...*");
             _isProcessing = false;
+            UnlockAndClearInput();
             await ShowPlayerInput();
             return;
         }
@@ -370,26 +327,46 @@ public class DialogueManagerV2 : MonoBehaviour
         UpdateDemoOverlay(response);
 
         if (!_provider.SupportsStreaming)
-        {
             ShowNPCText(response.Text);
-        }
 
         _conversationHistory.Add($"{_currentNPC.npcName}: {response.Text}");
-
         _currentExchangeIndex++;
 
+        if (conversationHistoryUI != null)
+            conversationHistoryUI.AddMessage(_currentNPC.npcName, response.Text, isPlayer: false);
+
+        UnlockAndClearInput();
         await ShowPlayerInput();
         _isProcessing = false;
+    }
+
+    // ================================================================
+    // Input field lock/unlock
+    // ================================================================
+
+    private void SetInputLocked(bool locked)
+    {
+        if (playerInputField != null)
+            playerInputField.interactable = !locked;
+        if (sendButton != null)
+            sendButton.interactable = !locked;
+    }
+
+    private void UnlockAndClearInput()
+    {
+        if (playerInputField != null)
+        {
+            playerInputField.text = "";
+            playerInputField.interactable = true;
+        }
+        if (sendButton != null)
+            sendButton.interactable = true;
     }
 
     // ================================================================
     // Streaming token handling
     // ================================================================
 
-    /// <summary>
-    /// Callback invoked per token on the background inference thread.
-    /// Enqueues the token for the main thread typewriter to consume.
-    /// </summary>
     private void OnStreamToken(string token)
     {
         if (!string.IsNullOrEmpty(token))
@@ -401,11 +378,6 @@ public class DialogueManagerV2 : MonoBehaviour
         while (_tokenQueue.TryDequeue(out _)) { }
     }
 
-    /// <summary>
-    /// Coroutine that displays streamed tokens as they arrive.
-    /// Polls the ConcurrentQueue each frame and appends text.
-    /// Hides the thinking indicator on first token and starts talking animation.
-    /// </summary>
     private IEnumerator StreamingTypewriterEffect()
     {
         npcDialogueText.text = "";
@@ -418,7 +390,6 @@ public class DialogueManagerV2 : MonoBehaviour
                 if (firstToken)
                 {
                     firstToken = false;
-                    // Hide thinking indicator and start talking on first token
                     SetThinking(false);
                     if (_currentNPC != null)
                     {
@@ -427,12 +398,11 @@ public class DialogueManagerV2 : MonoBehaviour
                             animator.SetBool("isTalking", true);
                     }
                 }
-                // Display token character-by-character for a smooth typewriter effect
+
                 foreach (char c in token)
                 {
                     npcDialogueText.text += c;
 
-                    // Play typing sound (skip for spaces)
                     if (typingAudioSource != null && typingSounds != null && typingSounds.Length > 0 && !char.IsWhiteSpace(c))
                     {
                         AudioClip clip = typingSounds[Random.Range(0, typingSounds.Length)];
@@ -445,12 +415,10 @@ public class DialogueManagerV2 : MonoBehaviour
             }
             else
             {
-                // No tokens available yet — wait a frame
                 yield return null;
             }
         }
 
-        // Reset pitch
         if (typingAudioSource != null)
             typingAudioSource.pitch = 1f;
     }
@@ -463,26 +431,24 @@ public class DialogueManagerV2 : MonoBehaviour
     {
         if (_provider.SupportsFreeInput)
         {
-            // Show text input for AI dialogue
             if (playerInputField != null)
             {
                 playerInputField.gameObject.SetActive(true);
+                playerInputField.text = "";
+                playerInputField.interactable = true;
                 playerInputField.ActivateInputField();
             }
+            if (sendButton != null)
+                sendButton.interactable = true;
             HideOptions();
         }
         else
         {
-            // Show options for scripted dialogue
             var options = await _provider.GetPlayerOptionsAsync(_currentNPC, _currentExchangeIndex);
             if (options != null && options.Length > 0)
-            {
                 ShowOptions(options);
-            }
             else
-            {
                 HideOptions();
-            }
         }
     }
 
@@ -505,9 +471,7 @@ public class DialogueManagerV2 : MonoBehaviour
     private void HideOptions()
     {
         foreach (var btn in optionButtons)
-        {
             btn.gameObject.SetActive(false);
-        }
     }
 
     private void ShowNPCText(string text)
@@ -515,14 +479,11 @@ public class DialogueManagerV2 : MonoBehaviour
         if (_typewriterCoroutine != null)
             StopCoroutine(_typewriterCoroutine);
 
-        // Start talking animation
         if (_currentNPC != null)
         {
             var animator = _currentNPC.GetComponentInChildren<Animator>();
             if (animator != null)
-            {
                 animator.SetBool("isTalking", true);
-            }
         }
 
         _typewriterCoroutine = StartCoroutine(TypewriterEffect(text));
@@ -535,13 +496,9 @@ public class DialogueManagerV2 : MonoBehaviour
         {
             npcDialogueText.text += c;
 
-            // Play typing sound (skip for spaces and punctuation)
             if (typingAudioSource != null && typingSounds != null && typingSounds.Length > 0 && !char.IsWhiteSpace(c))
             {
-                // Random clip from array
                 AudioClip clip = typingSounds[Random.Range(0, typingSounds.Length)];
-
-                // Slight pitch variation for natural feel
                 typingAudioSource.pitch = 1f + Random.Range(-typingPitchVariation, typingPitchVariation);
                 typingAudioSource.PlayOneShot(clip, typingVolume);
             }
@@ -549,7 +506,6 @@ public class DialogueManagerV2 : MonoBehaviour
             yield return new WaitForSeconds(typeSpeed);
         }
 
-        // Reset pitch
         if (typingAudioSource != null)
             typingAudioSource.pitch = 1f;
     }
@@ -560,21 +516,18 @@ public class DialogueManagerV2 : MonoBehaviour
 
     private void SetThinking(bool isThinking)
     {
-        // UI indicator
         if (thinkingIndicator != null)
             thinkingIndicator.SetActive(isThinking);
 
         if (isThinking)
             npcDialogueText.text = "";
 
-        // Trigger thinking animation on NPC
         if (_currentNPC != null)
         {
             var animator = _currentNPC.GetComponentInChildren<Animator>();
             if (animator != null)
             {
                 animator.SetBool("isThinking", isThinking);
-                // Stop talking while thinking
                 if (isThinking)
                     animator.SetBool("isTalking", false);
             }
@@ -587,17 +540,12 @@ public class DialogueManagerV2 : MonoBehaviour
 
         if (latencyText != null)
             latencyText.text = $"Latency: {response.LatencyMs}ms";
-
         if (modelText != null)
             modelText.text = $"Model: {response.ModelId}";
-
         if (locationText != null)
             locationText.text = $"Location: {response.InferenceLocation}";
     }
 
-    /// <summary>
-    /// Toggle the demo overlay visibility.
-    /// </summary>
     public void ToggleDemoOverlay()
     {
         if (demoOverlay != null)
@@ -609,28 +557,28 @@ public class DialogueManagerV2 : MonoBehaviour
         if (_typewriterCoroutine != null)
             StopCoroutine(_typewriterCoroutine);
 
-        // Stop talking animation
         _currentNPC?.GetComponentInChildren<Animator>()?.SetBool("isTalking", false);
-
-        // NPC stops looking at player
         _currentNPC?.GetComponent<NPCLookAt>()?.StopLookingAtPlayer(returnToOriginal: true);
 
-        // Camera unfocuses
         var cameraFocus = FindFirstObjectByType<DialogueCameraFocus>();
         cameraFocus?.Unfocus();
 
-        // Clear NPC conversation context (preserves system prompt)
         if (_currentNPC != null && _xybridProvider != null)
-        {
             _xybridProvider.ClearNPCContext(_currentNPC.npcName);
-        }
+
+        if (npcDebugPanel != null)
+            npcDebugPanel.Hide();
 
         HidePanel();
+        _isDialogueOpen = false;
         _currentNPC = null;
         _conversationHistory.Clear();
         ClearTokenQueue();
+        UnlockAndClearInput();
 
-        // Unfreeze player
+        if (conversationHistoryUI != null)
+            conversationHistoryUI.Clear();
+
         var player = FindFirstObjectByType<PlayerInteraction>();
         if (player != null)
             player.EndDialogue();
@@ -672,20 +620,27 @@ public class DialogueManagerV2 : MonoBehaviour
 
     private void OnDestroy()
     {
+        // Model lifecycle is owned by XybridModelService — nothing to dispose here.
     }
 
     private void Update()
     {
-        // Toggle demo overlay with Tab
         if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
-        {
             ToggleDemoOverlay();
-        }
 
-        // Toggle between AI/Scripted with F1
         if (Keyboard.current != null && Keyboard.current.f1Key.wasPressedThisFrame)
-        {
             SetUseAIDialogue(!useAIDialogue);
+
+        if (Keyboard.current != null && Keyboard.current.backquoteKey.wasPressedThisFrame && npcDebugPanel != null)
+            npcDebugPanel.Toggle();
+
+        // Submit on Enter while input field is focused (replaces onEndEdit to avoid
+        // spurious inference triggers on focus loss)
+        if (!_isProcessing && playerInputField != null && playerInputField.isFocused &&
+            Keyboard.current != null &&
+            (Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.numpadEnterKey.wasPressedThisFrame))
+        {
+            OnSendClicked();
         }
     }
 }
