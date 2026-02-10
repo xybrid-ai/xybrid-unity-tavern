@@ -23,7 +23,7 @@ namespace Tavern.Dialogue
 
         public string ProviderName => $"Xybrid ({XybridModelService.Instance?.ModelId ?? "not ready"})";
         public bool SupportsFreeInput => true;
-        public bool SupportsStreaming => true;
+        public bool SupportsStreaming => false;
 
         // Last inference stats for the demo overlay
         public uint LastLatencyMs { get; private set; }
