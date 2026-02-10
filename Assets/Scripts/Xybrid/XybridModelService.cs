@@ -64,15 +64,10 @@ namespace Tavern.Dialogue
         }
 
         /// <summary>
-        /// Run inference with a fully-built prompt string.
-        /// Uses model.Run(envelope) without native ConversationContext.
-        /// The caller is responsible for including system prompt and history in the prompt.
+        /// Run inference with ConversationContext (system prompt + history managed natively).
+        /// The envelope carries the current user input; context provides system prompt and history.
         /// </summary>
-        /// <remarks>
-        /// Native ConversationContext is disabled due to a crash in xybrid_model_run_with_context.
-        /// TODO: Re-enable once the xybrid-ffi context bug is fixed.
-        /// </remarks>
-        public async Task<DialogueResponse> RunInferenceAsync(string fullPrompt)
+        public async Task<DialogueResponse> RunInferenceAsync(string userInput, ConversationContext context)
         {
             if (!_isReady)
                 return DialogueResponse.FromError("XybridModelService not ready");
@@ -86,8 +81,8 @@ namespace Tavern.Dialogue
 
                 await Task.Run(() =>
                 {
-                    using (var envelope = Envelope.Text(fullPrompt))
-                    using (var inferenceResult = _model.Run(envelope))
+                    using (var envelope = Envelope.Text(userInput))
+                    using (var inferenceResult = _model.Run(envelope, context))
                     {
                         if (inferenceResult.Success)
                         {
@@ -125,10 +120,9 @@ namespace Tavern.Dialogue
         }
 
         /// <summary>
-        /// Run streaming inference with a fully-built prompt string.
-        /// Uses model.RunStreaming(envelope, onToken) — simple, no ConversationContext.
+        /// Run streaming inference with ConversationContext.
         /// </summary>
-        public async Task<DialogueResponse> RunStreamingAsync(string fullPrompt, Action<string> onToken)
+        public async Task<DialogueResponse> RunStreamingAsync(string userInput, ConversationContext context, Action<string> onToken)
         {
             if (!_isReady)
                 return DialogueResponse.FromError("XybridModelService not ready");
@@ -142,8 +136,8 @@ namespace Tavern.Dialogue
 
                 await Task.Run(() =>
                 {
-                    using (var envelope = Envelope.Text(fullPrompt))
-                    using (var inferenceResult = _model.RunStreaming(envelope, token =>
+                    using (var envelope = Envelope.Text(userInput))
+                    using (var inferenceResult = _model.RunStreaming(envelope, context, token =>
                     {
                         onToken?.Invoke(token.Token);
                     }))
