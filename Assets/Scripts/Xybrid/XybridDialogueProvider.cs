@@ -3,57 +3,40 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
-using Xybrid;
 
 namespace Tavern.Dialogue
 {
     /// <summary>
     /// Dialogue provider that uses Xybrid SDK for AI-generated responses.
-    /// Owns the Model directly. Uses Task.Run to keep inference off the main thread.
+    /// Delegates inference to XybridModelService (single model instance).
+    /// Owns prompt construction, conversation history, and response cleaning.
     /// </summary>
-    public class XybridDialogueProvider : IDialogueProvider, IDisposable
+    public class XybridDialogueProvider : IDialogueProvider
     {
         private const int MaxHistoryExchanges = 10;
         private const string GreetingInput = "A traveler has just approached you. Greet them naturally, in character.";
 
-        private Model _model;
-        private bool _initialized;
-        private readonly string _modelId;
+        private readonly XybridModelService _service;
         private WorldLore _worldLore;
 
         private readonly Dictionary<string, List<HistoryEntry>> _npcHistory
             = new Dictionary<string, List<HistoryEntry>>();
 
-        public string ProviderName => $"Xybrid ({_modelId})";
+        public string ProviderName => $"Xybrid ({_service.ModelId})";
         public bool SupportsFreeInput => true;
         public bool SupportsStreaming => true;
 
         public uint LastLatencyMs { get; private set; }
         public string LastInferenceLocation { get; private set; } = "device";
 
-        public XybridDialogueProvider(string modelId)
+        public XybridDialogueProvider(XybridModelService service)
         {
-            _modelId = modelId;
+            _service = service;
         }
 
         public void SetWorldLore(WorldLore lore)
         {
             _worldLore = lore;
-        }
-
-        public async Task InitializeAsync()
-        {
-            if (_initialized) return;
-
-            Debug.Log("[XybridProvider] Initializing SDK...");
-            await Task.Run(() =>
-            {
-                XybridClient.Initialize();
-                _model = XybridClient.LoadModel(_modelId);
-            });
-
-            _initialized = true;
-            Debug.Log($"[XybridProvider] Ready: model={_model.ModelId}, SDK v{XybridClient.Version}");
         }
 
         // ================================================================
@@ -84,8 +67,8 @@ namespace Tavern.Dialogue
         private async Task<DialogueResponse> RunDialogueAsync(
             NPCIdentity npc, string userInput, Action<string> onToken = null)
         {
-            if (!_initialized)
-                return DialogueResponse.FromError("XybridProvider not initialized");
+            if (!_service.IsReady)
+                return DialogueResponse.FromError("XybridModelService not ready");
 
             var history = GetOrCreateHistory(npc.npcName);
             string fullPrompt = BuildFullPrompt(npc, history, userInput);
@@ -94,8 +77,8 @@ namespace Tavern.Dialogue
             Debug.Log($"[XybridProvider] {(streaming ? "Streaming" : "Non-streaming")} for {npc.npcName} ({fullPrompt.Length} chars)");
 
             var response = streaming
-                ? await RunStreamingInferenceAsync(fullPrompt, onToken)
-                : await RunInferenceAsync(fullPrompt);
+                ? await _service.RunStreamingAsync(fullPrompt, onToken)
+                : await _service.RunInferenceAsync(fullPrompt);
 
             if (response.Success)
             {
@@ -109,104 +92,10 @@ namespace Tavern.Dialogue
         }
 
         // ================================================================
-        // Inference — Task.Run to keep main thread free
-        // ================================================================
-
-        private async Task<DialogueResponse> RunInferenceAsync(string fullPrompt)
-        {
-            try
-            {
-                string result = null;
-                uint latency = 0;
-                string errorMsg = null;
-
-                await Task.Run(() =>
-                {
-                    using (var envelope = Envelope.Text(fullPrompt))
-                    using (var inferenceResult = _model.Run(envelope))
-                    {
-                        if (inferenceResult.Success)
-                        {
-                            result = inferenceResult.Text;
-                            latency = inferenceResult.LatencyMs;
-                        }
-                        else
-                        {
-                            errorMsg = inferenceResult.Error ?? "Inference returned Success=false";
-                        }
-                    }
-                });
-
-                if (errorMsg != null)
-                    return DialogueResponse.FromError(errorMsg);
-
-                return new DialogueResponse
-                {
-                    Text = result,
-                    Success = true,
-                    LatencyMs = latency,
-                    ModelId = _model.ModelId,
-                    InferenceLocation = "device"
-                };
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[XybridProvider] Inference failed: {ex.Message}");
-                return DialogueResponse.FromError(ex.Message);
-            }
-        }
-
-        private async Task<DialogueResponse> RunStreamingInferenceAsync(string fullPrompt, Action<string> onToken)
-        {
-            try
-            {
-                string result = null;
-                uint latency = 0;
-                string errorMsg = null;
-
-                await Task.Run(() =>
-                {
-                    using (var envelope = Envelope.Text(fullPrompt))
-                    using (var inferenceResult = _model.RunStreaming(envelope, token =>
-                    {
-                        // Debug.Log($"[XybridProvider] Streaming token: {token.Token}");
-                        onToken?.Invoke(token.Token);
-                    }))
-                    {
-                        if (inferenceResult.Success)
-                        {
-                            result = inferenceResult.Text;
-                            latency = inferenceResult.LatencyMs;
-                        }
-                        else
-                        {
-                            errorMsg = inferenceResult.Error ?? "Streaming inference returned Success=false";
-                        }
-                    }
-                });
-
-                if (errorMsg != null)
-                    return DialogueResponse.FromError(errorMsg);
-
-                return new DialogueResponse
-                {
-                    Text = result,
-                    Success = true,
-                    LatencyMs = latency,
-                    ModelId = _model.ModelId,
-                    InferenceLocation = "device"
-                };
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[XybridProvider] Streaming inference failed: {ex.Message}");
-                return DialogueResponse.FromError(ex.Message);
-            }
-        }
-
-        // ================================================================
         // Prompt construction
         // ================================================================
+
+        private const int MaxPromptLength = 1800;
 
         private string BuildFullPrompt(NPCIdentity npc, List<HistoryEntry> history, string userInput)
         {
@@ -215,99 +104,51 @@ namespace Tavern.Dialogue
             sb.Append(BuildSystemPrompt(npc));
             sb.AppendLine();
 
-            if (history.Count > 0)
-            {
-                sb.AppendLine("=== CONVERSATION SO FAR ===");
-                foreach (var entry in history)
-                {
-                    sb.AppendLine($"Traveler: {entry.UserInput}");
-                    sb.AppendLine($"{npc.npcName}: {entry.AssistantResponse}");
-                }
-                sb.AppendLine();
-            }
+            // TODO: Re-enable conversation history in prompt once model context
+            // window is large enough to handle it without degrading responses.
+            // History is still tracked for the ConversationHistoryUI sidebar.
 
             sb.AppendLine($"Traveler: {userInput}");
             sb.Append($"{npc.npcName}:");
 
-            return sb.ToString();
+            string prompt = sb.ToString();
+
+            if (prompt.Length > MaxPromptLength)
+                Debug.LogWarning($"[XybridProvider] Prompt for {npc.npcName} is {prompt.Length} chars (limit: {MaxPromptLength}). Risk of native FFI crash.");
+
+            return prompt;
         }
 
         private string BuildSystemPrompt(NPCIdentity npc)
         {
             var sb = new StringBuilder();
 
-            sb.Append(BuildWorldSection());
-
-            sb.AppendLine("=== SETTING ===");
-            sb.AppendLine("The Rusty Flagon tavern. Evening time, fire crackling, ambient chatter.");
-            sb.AppendLine();
-
-            sb.AppendLine("=== YOUR CHARACTER ===");
-            sb.AppendLine($"Name: {npc.npcName}");
-            sb.AppendLine($"Role: {npc.description}");
-            sb.AppendLine($"Core traits: {npc.personality}");
-
-            string extendedPersonality = npc.extendedPersonality;
-            if (!string.IsNullOrEmpty(extendedPersonality))
-            {
-                sb.AppendLine();
-                sb.AppendLine("=== CHARACTER DETAILS ===");
-                sb.AppendLine(extendedPersonality);
-            }
-
-            sb.AppendLine();
-            sb.AppendLine("=== RULES ===");
-            sb.AppendLine("- Write ONLY your character's spoken words, nothing else");
-            sb.AppendLine("- 1-2 sentences maximum");
-            sb.AppendLine("- Match the speech style described above");
-            sb.AppendLine("- Only reference things your character would know");
-            sb.AppendLine("- No quotation marks, no action descriptions, no narration");
-            sb.AppendLine("- Stay fully in character");
-
-            return sb.ToString();
-        }
-
-        private string BuildWorldSection()
-        {
-            var sb = new StringBuilder();
-
+            // Layer 1: World context (condensed)
             if (_worldLore != null)
             {
-                sb.AppendLine("=== WORLD ===");
-                if (!string.IsNullOrEmpty(_worldLore.worldOverview))
-                    sb.AppendLine(_worldLore.worldOverview);
-                if (!string.IsNullOrEmpty(_worldLore.regionDescription))
-                    sb.AppendLine(_worldLore.regionDescription);
+                if (!string.IsNullOrEmpty(_worldLore.worldBrief))
+                    sb.AppendLine($"[World] {_worldLore.worldBrief}");
+
+                if (!string.IsNullOrEmpty(_worldLore.settingBrief))
+                    sb.AppendLine($"[Setting] {_worldLore.settingBrief}");
+                else
+                    sb.AppendLine("[Setting] The Rusty Flagon tavern. Evening, fire crackling.");
+
                 sb.AppendLine();
-
-                sb.AppendLine("=== LOCAL AREA ===");
-                if (!string.IsNullOrEmpty(_worldLore.localArea))
-                    sb.AppendLine(_worldLore.localArea);
-                if (!string.IsNullOrEmpty(_worldLore.tavernHistory))
-                    sb.AppendLine($"The Tavern: {_worldLore.tavernHistory}");
-                sb.AppendLine();
-
-                if (!string.IsNullOrEmpty(_worldLore.recentEvents))
-                {
-                    sb.AppendLine("=== COMMON KNOWLEDGE (what everyone knows) ===");
-                    sb.AppendLine(_worldLore.recentEvents);
-                    sb.AppendLine();
-                }
-
-                if (!string.IsNullOrEmpty(_worldLore.rumorsAndMysteries))
-                {
-                    sb.AppendLine("=== RUMORS (may or may not be true) ===");
-                    sb.AppendLine(_worldLore.rumorsAndMysteries);
-                    sb.AppendLine();
-                }
-
-                if (!string.IsNullOrEmpty(_worldLore.knowledgeBoundaries))
-                {
-                    sb.AppendLine("=== KNOWLEDGE BOUNDARIES (you do NOT know about) ===");
-                    sb.AppendLine(_worldLore.knowledgeBoundaries);
-                    sb.AppendLine();
-                }
             }
+
+            // Layer 2: Character identity
+            sb.AppendLine($"[Character] {npc.npcName}, {npc.description}. {npc.personality}.");
+
+            // Layer 3: NPC-specific details (knowledge, speech style, relationships)
+            string extendedPersonality = npc.extendedPersonality;
+            if (!string.IsNullOrEmpty(extendedPersonality))
+                sb.AppendLine($"[Details] {extendedPersonality}");
+
+            sb.AppendLine();
+
+            // Rules (compressed)
+            sb.AppendLine("[Rules] Speak only in character, 1-2 sentences. No quotes, narration, or actions. No modern concepts or fourth-wall breaks.");
 
             return sb.ToString();
         }
@@ -396,16 +237,8 @@ namespace Tavern.Dialogue
         }
 
         // ================================================================
-        // Dispose + Types
+        // Types
         // ================================================================
-
-        public void Dispose()
-        {
-            Debug.Log("[XybridProvider] Disposing model...");
-            _model?.Dispose();
-            _model = null;
-            _initialized = false;
-        }
 
         private struct HistoryEntry
         {

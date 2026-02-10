@@ -16,7 +16,6 @@ public class DialogueManagerV2 : MonoBehaviour
 {
     [Header("Provider Settings")]
     [SerializeField] private bool useAIDialogue = false;
-    [SerializeField] private string xybridModelId = "gemma-3-1b";
     [SerializeField] private WorldLore worldLore;
 
     [Header("UI References")]
@@ -61,6 +60,7 @@ public class DialogueManagerV2 : MonoBehaviour
     private Coroutine _panelFadeCoroutine;
     private List<string> _conversationHistory = new List<string>();
     private bool _isProcessing;
+    private bool _isDialogueOpen;
     private CanvasGroup _panelCanvasGroup;
 
     // Streaming token queue — filled by background thread, consumed by typewriter coroutine
@@ -82,13 +82,19 @@ public class DialogueManagerV2 : MonoBehaviour
         {
             try
             {
-                _xybridProvider = new XybridDialogueProvider(xybridModelId);
+                var service = XybridModelService.Instance;
+                if (service == null)
+                    throw new System.InvalidOperationException(
+                        "XybridModelService not found in scene. Add it to a GameObject.");
+
+                await service.InitializeAsync();
+
+                _xybridProvider = new XybridDialogueProvider(service);
                 if (worldLore != null)
                     _xybridProvider.SetWorldLore(worldLore);
 
-                await _xybridProvider.InitializeAsync();
                 _provider = _xybridProvider;
-                Debug.Log($"[DialogueManager] Using Xybrid AI dialogue ({xybridModelId})");
+                Debug.Log($"[DialogueManager] Using Xybrid AI dialogue ({service.ModelId})");
             }
             catch (System.Exception ex)
             {
@@ -152,7 +158,8 @@ public class DialogueManagerV2 : MonoBehaviour
 
     public async void StartDialogue(NPCIdentity npc)
     {
-        if (_isProcessing) return;
+        if (_isProcessing || _isDialogueOpen) return;
+        _isDialogueOpen = true;
 
         _currentNPC = npc;
         _currentExchangeIndex = 0;
@@ -554,6 +561,7 @@ public class DialogueManagerV2 : MonoBehaviour
             _xybridProvider.ClearNPCContext(_currentNPC.npcName);
 
         HidePanel();
+        _isDialogueOpen = false;
         _currentNPC = null;
         _conversationHistory.Clear();
         ClearTokenQueue();
@@ -603,7 +611,7 @@ public class DialogueManagerV2 : MonoBehaviour
 
     private void OnDestroy()
     {
-        _xybridProvider?.Dispose();
+        // Model lifecycle is owned by XybridModelService — nothing to dispose here.
     }
 
     private void Update()

@@ -35,4 +35,13 @@ public class WorldLore : ScriptableObject
     [TextArea(3, 6)]
     [Tooltip("Explicit boundaries - modern tech, other worlds, meta knowledge, etc.")]
     public string knowledgeBoundaries;
+
+    [Header("Condensed Context (used in AI prompts)")]
+    [TextArea(2, 4)]
+    [Tooltip("1-2 sentences. Essential world context for AI prompts. Keep under 150 chars.")]
+    public string worldBrief;
+
+    [TextArea(2, 4)]
+    [Tooltip("1 sentence. Immediate setting — tavern, time of day, atmosphere. Keep under 80 chars.")]
+    public string settingBrief;
 }
