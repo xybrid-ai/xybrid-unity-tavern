@@ -123,32 +123,31 @@ namespace Tavern.Dialogue
         {
             var sb = new StringBuilder();
 
+            // "You are" framing — small completion models follow this better than
+            // structured tags which they tend to echo back.
+            sb.Append($"You are {npc.npcName}, {npc.description}.");
+            sb.AppendLine($" {npc.personality}.");
+
             // Layer 1: World context (condensed)
             if (_worldLore != null)
             {
+                string setting = !string.IsNullOrEmpty(_worldLore.settingBrief)
+                    ? _worldLore.settingBrief
+                    : "The Rusty Flagon tavern. Evening, fire crackling.";
+
                 if (!string.IsNullOrEmpty(_worldLore.worldBrief))
-                    sb.AppendLine($"[World] {_worldLore.worldBrief}");
-
-                if (!string.IsNullOrEmpty(_worldLore.settingBrief))
-                    sb.AppendLine($"[Setting] {_worldLore.settingBrief}");
+                    sb.AppendLine($"{_worldLore.worldBrief} {setting}");
                 else
-                    sb.AppendLine("[Setting] The Rusty Flagon tavern. Evening, fire crackling.");
-
-                sb.AppendLine();
+                    sb.AppendLine(setting);
             }
 
-            // Layer 2: Character identity
-            sb.AppendLine($"[Character] {npc.npcName}, {npc.description}. {npc.personality}.");
-
-            // Layer 3: NPC-specific details (knowledge, speech style, relationships)
+            // Layer 2: NPC-specific details (knowledge, speech style, relationships)
             string extendedPersonality = npc.extendedPersonality;
             if (!string.IsNullOrEmpty(extendedPersonality))
-                sb.AppendLine($"[Details] {extendedPersonality}");
+                sb.AppendLine(extendedPersonality);
 
-            sb.AppendLine();
-
-            // Rules (compressed)
-            sb.AppendLine("[Rules] Speak only in character, 1-2 sentences. No quotes, narration, or actions. No modern concepts or fourth-wall breaks.");
+            // Rules — direct instruction
+            sb.AppendLine("Reply in 1-2 sentences as spoken dialogue only. No quotes, no narration, no actions.");
 
             return sb.ToString();
         }
