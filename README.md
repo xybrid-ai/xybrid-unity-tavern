@@ -13,15 +13,29 @@ Each release includes a complete Unity project zip ready to import.
 - **Unity 2022.3 LTS** (or later)
 - **Xybrid SDK** - [Get it here](https://github.com/xybrid-ai/xybrid)
 
-## Quick Start
+## Installation
 
-1. Download the latest release zip from GitHub Releases
-2. Extract the zip to your Unity projects folder
-3. Open Unity Hub and click "Add" to add the extracted project
-4. Open the project in Unity 2022.3 LTS or later
-5. Import the Xybrid SDK package if not already included
-6. Open the `Tavern` scene in `Assets/Scenes/`
-7. Press Play to start interacting with NPCs
+### 1. Download the project
+
+Download the latest release zip from [GitHub Releases](https://github.com/xybrid-ai/xybrid-unity-tavern/releases) and extract it to your Unity projects folder.
+
+### 2. Open in Unity
+
+Open Unity Hub, click **Add**, and select the extracted project folder. Open it with Unity 2022.3 LTS or later.
+
+### 3. Install the Xybrid SDK
+
+If the Xybrid SDK package is not already included in the project:
+
+1. Download the SDK from [github.com/xybrid-ai/xybrid](https://github.com/xybrid-ai/xybrid)
+2. In Unity, go to **Assets > Import Package > Custom Package**
+3. Select the downloaded Xybrid SDK package and import all assets
+
+### 4. Open the scene and play
+
+1. In the Project panel, navigate to `Assets/Scenes/`
+2. Open the `Tavern` scene
+3. Press **Play** to start interacting with NPCs
 
 ## Features
 
@@ -32,8 +46,12 @@ Each release includes a complete Unity project zip ready to import.
 
 ## Screenshots
 
-<!-- Add screenshots here -->
-*Screenshots coming soon*
+| | |
+|---|---|
+| [![NPC Greeting](docs/screenshots/npc-greeting.png)](docs/screenshots/npc-greeting.png) | [![NPC Conversation](docs/screenshots/npc-conversation.png)](docs/screenshots/npc-conversation.png) |
+| [![NPC Greeting](docs/screenshots/npc-greeting-2.png)](docs/screenshots/npc-greeting-2.png) | [![NPC Conversation](docs/screenshots/npc-conversation-2.png)](docs/screenshots/npc-conversation-2.png) |
+
+*Talk to NPCs like Greta the barkeeper — each character responds dynamically using on-device AI.*
 
 ## Project Structure
 
@@ -49,25 +67,6 @@ Assets/
 ## Documentation
 
 See the [docs/](docs/) folder for additional documentation.
-
-## Releasing
-
-To create a new release:
-
-1. Run the release script with a version number:
-   ```bash
-   ./scripts/release.sh v0.1.0
-   ```
-
-2. This creates a zip in `releases/` containing the full Unity project
-
-3. Create a GitHub release and upload the zip:
-   ```bash
-   git tag v0.1.0 && git push origin v0.1.0
-   gh release create v0.1.0 releases/Night-Tavern-v0.1.0.zip \
-     --repo xybrid-ai/xybrid-unity-tavern \
-     --title "Night-Tavern v0.1.0"
-   ```
 
 ## Related
 
