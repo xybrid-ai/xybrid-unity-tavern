@@ -42,3 +42,7 @@ Thumbs.db
 
 # Xybrid files
 *.xyb
+
+# Manigest for references
+!Packages/manifest.json
+!Packages/packages-lock.json
