@@ -14,5 +14,6 @@
    git tag v0.1.0-alpha3 && git push origin v0.1.0-alpha3
    gh release create v0.1.0-alpha3 releases/Night-Tavern-v0.1.0-alpha3.zip \
      --repo xybrid-ai/xybrid-unity-tavern \
-     --title "Night-Tavern v0.1.0-alpha3"
+     --title "Night-Tavern v0.1.0-alpha3" \
+     --notes "Alpha 3 release of Night Tavern demo."
    ```
