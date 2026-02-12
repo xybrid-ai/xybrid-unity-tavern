@@ -2,6 +2,13 @@
 
 A full RPG example project demonstrating Xybrid SDK integration with Unity. Features immersive NPC dialogue powered by AI and text-to-speech audio for dynamic character interactions.
 
+| | |
+|---|---|
+| [![NPC Greeting](docs/screenshots/npc-greeting.png)](docs/screenshots/npc-greeting.png) | [![NPC Conversation](docs/screenshots/npc-conversation.png)](docs/screenshots/npc-conversation.png) |
+| [![NPC Greeting](docs/screenshots/npc-greeting-2.png)](docs/screenshots/npc-greeting-2.png) | [![NPC Conversation](docs/screenshots/npc-conversation-2.png)](docs/screenshots/npc-conversation-2.png) |
+
+*Talk to NPCs like Greta the barkeeper — each character responds dynamically using on-device AI.*
+
 ## Download
 
 Get the latest release from [GitHub Releases](https://github.com/xybrid-ai/xybrid-unity-tavern/releases).
@@ -43,15 +50,6 @@ If the Xybrid SDK package is not already included in the project:
 - **Text-to-Speech Audio** - Characters speak with synthesized voices for immersive interactions
 - **RPG Tavern Setting** - Atmospheric medieval tavern environment
 - **Multiple NPCs** - Interact with various characters, each with unique personalities
-
-## Screenshots
-
-| | |
-|---|---|
-| [![NPC Greeting](docs/screenshots/npc-greeting.png)](docs/screenshots/npc-greeting.png) | [![NPC Conversation](docs/screenshots/npc-conversation.png)](docs/screenshots/npc-conversation.png) |
-| [![NPC Greeting](docs/screenshots/npc-greeting-2.png)](docs/screenshots/npc-greeting-2.png) | [![NPC Conversation](docs/screenshots/npc-conversation-2.png)](docs/screenshots/npc-conversation-2.png) |
-
-*Talk to NPCs like Greta the barkeeper — each character responds dynamically using on-device AI.*
 
 ## Project Structure
 
