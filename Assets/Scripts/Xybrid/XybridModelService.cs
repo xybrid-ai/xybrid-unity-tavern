@@ -1,13 +1,16 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using Xybrid;
+using Xybrid.ModelAsset;
 
 namespace Tavern.Dialogue
 {
     /// <summary>
-    /// Singleton service that owns the Xybrid model instance and serializes inference requests.
+    /// Singleton service that owns multiple Xybrid model instances and serializes inference requests.
+    /// Supports loading multiple models simultaneously (e.g., LLM + TTS).
     /// Attach to a GameObject in the scene. Persists across scene loads.
     /// </summary>
     [DefaultExecutionOrder(-100)]
@@ -15,18 +18,60 @@ namespace Tavern.Dialogue
     {
         public static XybridModelService Instance { get; private set; }
 
-        [SerializeField] private string _modelId;
+        [Header("Models")]
+        [Tooltip("Drag .xyb model assets here. Supports multiple models (LLM, TTS, etc.)")]
+        [SerializeField] private XybridModelAsset[] _modelAssets;
+
+        [Header("Settings")]
         [SerializeField] private bool _persistAcrossScenes = true;
 
-        private Model _model;
+        // Legacy fallback — kept for backward compat with existing scenes
+        [SerializeField, HideInInspector] private string _modelId;
+
+        private readonly Dictionary<string, ModelEntry> _models = new Dictionary<string, ModelEntry>();
         private bool _isReady;
         private string _sdkVersion;
-        private readonly SemaphoreSlim _inferenceLock = new SemaphoreSlim(1, 1);
+        private Task _initTask;
 
         public bool IsReady => _isReady;
-        public bool IsProcessing => _inferenceLock.CurrentCount == 0;
-        public string ModelId => _model?.ModelId ?? _modelId;
         public string SdkVersion => _sdkVersion;
+
+        /// <summary>
+        /// Returns the LLM model ID for backward compatibility.
+        /// </summary>
+        public string ModelId
+        {
+            get
+            {
+                var llm = GetLLMEntry();
+                return llm?.Model?.ModelId ?? _modelId;
+            }
+        }
+
+        /// <summary>
+        /// Returns true if any model is currently processing inference.
+        /// </summary>
+        public bool IsProcessing
+        {
+            get
+            {
+                foreach (var entry in _models.Values)
+                {
+                    if (entry.Lock.CurrentCount == 0) return true;
+                }
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Returns true if a TTS model is loaded and available.
+        /// </summary>
+        public bool HasTTSModel => GetTTSEntry() != null;
+
+        /// <summary>
+        /// Returns the TTS model asset (for reading voice catalog), or null.
+        /// </summary>
+        public XybridModelAsset TTSModelAsset => GetTTSEntry()?.Asset;
 
         private void Awake()
         {
@@ -43,36 +88,137 @@ namespace Tavern.Dialogue
         }
 
         /// <summary>
-        /// Initialize the Xybrid SDK and load the model. Idempotent.
+        /// Initialize the Xybrid SDK and load all configured models.
+        /// Safe to call from multiple callers — only the first call runs init,
+        /// subsequent callers await the same task.
         /// </summary>
-        public async Task InitializeAsync()
+        public Task InitializeAsync()
         {
-            if (_isReady) return;
+            if (_initTask == null)
+                _initTask = InitializeCoreAsync();
+            return _initTask;
+        }
 
-            if (string.IsNullOrWhiteSpace(_modelId))
-                throw new InvalidOperationException("Model ID is not set. Configure it in the Inspector on XybridModelService.");
-
-            await Task.Run(() =>
+        private async Task InitializeCoreAsync()
+        {
+            // Use model assets if configured
+            if (_modelAssets != null && _modelAssets.Length > 0)
             {
-                XybridClient.Initialize();
-                _model = XybridClient.LoadModel(_modelId);
-            });
+                // Build models on background thread, collect into local list first
+                var loaded = new List<KeyValuePair<string, ModelEntry>>();
+
+                await Task.Run(() =>
+                {
+                    XybridClient.Initialize();
+
+                    foreach (var asset in _modelAssets)
+                    {
+                        if (asset == null) continue;
+
+                        string path = asset.GetRuntimePath();
+                        Model model;
+
+                        if (!string.IsNullOrEmpty(path) && System.IO.File.Exists(path))
+                        {
+                            model = XybridClient.LoadModelFromBundle(path);
+                        }
+                        else
+                        {
+                            // Fall back to registry if bundle not in StreamingAssets
+                            model = XybridClient.LoadModel(asset.modelId);
+                        }
+
+                        loaded.Add(new KeyValuePair<string, ModelEntry>(
+                            asset.modelId,
+                            new ModelEntry { Model = model, Asset = asset }
+                        ));
+                    }
+                });
+
+                // Populate dictionary on main thread (no contention)
+                foreach (var kvp in loaded)
+                    _models[kvp.Key] = kvp.Value;
+            }
+            // Legacy fallback: single model ID string
+            else if (!string.IsNullOrWhiteSpace(_modelId))
+            {
+                Model model = null;
+                await Task.Run(() =>
+                {
+                    XybridClient.Initialize();
+                    model = XybridClient.LoadModel(_modelId);
+                });
+                _models[_modelId] = new ModelEntry { Model = model, Asset = null };
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    "No model assets assigned. Configure Model Assets in the Inspector on XybridModelService.");
+            }
 
             _sdkVersion = XybridClient.Version;
             _isReady = true;
-            Debug.Log($"[XybridModelService] Ready: model={_model.ModelId}, SDK v{_sdkVersion}");
+
+            foreach (var kvp in _models)
+            {
+                string task = kvp.Value.Asset != null ? kvp.Value.Asset.task : "unknown";
+                Debug.Log($"[XybridModelService] Loaded: {kvp.Key} ({task}), SDK v{_sdkVersion}");
+            }
         }
+
+        // ================================================================
+        // Model accessors
+        // ================================================================
+
+        /// <summary>
+        /// Get a loaded model by its model ID.
+        /// </summary>
+        public Model GetModel(string modelId)
+        {
+            return _models.TryGetValue(modelId, out var entry) ? entry.Model : null;
+        }
+
+        private ModelEntry GetEntryByTask(params string[] taskNames)
+        {
+            foreach (var kvp in _models)
+            {
+                if (kvp.Value.Asset == null) continue;
+                string t = kvp.Value.Asset.task?.ToLowerInvariant() ?? "";
+                foreach (var taskName in taskNames)
+                {
+                    if (t == taskName) return kvp.Value;
+                }
+            }
+            // Fallback: if only one model loaded (legacy), return it for LLM queries
+            if (taskNames.Length > 0 && (taskNames[0] == "text-generation" || taskNames[0] == "llm")
+                && _models.Count == 1)
+            {
+                foreach (var entry in _models.Values)
+                    return entry;
+            }
+            return null;
+        }
+
+        private ModelEntry GetLLMEntry() => GetEntryByTask("text-generation", "llm", "chat");
+        private ModelEntry GetTTSEntry() => GetEntryByTask("text-to-speech", "tts");
+
+        // ================================================================
+        // LLM inference (backward-compatible API)
+        // ================================================================
 
         /// <summary>
         /// Run inference with ConversationContext (system prompt + history managed natively).
-        /// The envelope carries the current user input; context provides system prompt and history.
         /// </summary>
         public async Task<DialogueResponse> RunInferenceAsync(string userInput, ConversationContext context)
         {
             if (!_isReady)
                 return DialogueResponse.FromError("XybridModelService not ready");
 
-            await _inferenceLock.WaitAsync();
+            var entry = GetLLMEntry();
+            if (entry == null)
+                return DialogueResponse.FromError("No LLM model loaded");
+
+            await entry.Lock.WaitAsync();
             try
             {
                 string result = null;
@@ -82,7 +228,7 @@ namespace Tavern.Dialogue
                 await Task.Run(() =>
                 {
                     using (var envelope = Envelope.Text(userInput))
-                    using (var inferenceResult = _model.Run(envelope, context))
+                    using (var inferenceResult = entry.Model.Run(envelope, context))
                     {
                         if (inferenceResult.Success)
                         {
@@ -104,7 +250,7 @@ namespace Tavern.Dialogue
                     Text = result,
                     Success = true,
                     LatencyMs = latency,
-                    ModelId = _model.ModelId,
+                    ModelId = entry.Model.ModelId,
                     InferenceLocation = "device"
                 };
             }
@@ -115,7 +261,7 @@ namespace Tavern.Dialogue
             }
             finally
             {
-                _inferenceLock.Release();
+                entry.Lock.Release();
             }
         }
 
@@ -127,7 +273,11 @@ namespace Tavern.Dialogue
             if (!_isReady)
                 return DialogueResponse.FromError("XybridModelService not ready");
 
-            await _inferenceLock.WaitAsync();
+            var entry = GetLLMEntry();
+            if (entry == null)
+                return DialogueResponse.FromError("No LLM model loaded");
+
+            await entry.Lock.WaitAsync();
             try
             {
                 string result = null;
@@ -137,7 +287,7 @@ namespace Tavern.Dialogue
                 await Task.Run(() =>
                 {
                     using (var envelope = Envelope.Text(userInput))
-                    using (var inferenceResult = _model.RunStreaming(envelope, context, token =>
+                    using (var inferenceResult = entry.Model.RunStreaming(envelope, context, token =>
                     {
                         onToken?.Invoke(token.Token);
                     }))
@@ -162,7 +312,7 @@ namespace Tavern.Dialogue
                     Text = result,
                     Success = true,
                     LatencyMs = latency,
-                    ModelId = _model.ModelId,
+                    ModelId = entry.Model.ModelId,
                     InferenceLocation = "device"
                 };
             }
@@ -173,16 +323,72 @@ namespace Tavern.Dialogue
             }
             finally
             {
-                _inferenceLock.Release();
+                entry.Lock.Release();
             }
         }
 
+        // ================================================================
+        // TTS inference
+        // ================================================================
+
+        /// <summary>
+        /// Run TTS inference to generate audio from text.
+        /// Returns raw PCM bytes (16-bit signed LE, 24kHz, mono), or null on failure.
+        /// </summary>
+        public async Task<byte[]> RunTTSAsync(string text, string voiceId = null)
+        {
+            var entry = GetTTSEntry();
+            if (entry == null)
+            {
+                Debug.LogWarning("[XybridModelService] No TTS model loaded");
+                return null;
+            }
+
+            await entry.Lock.WaitAsync();
+            try
+            {
+                byte[] audioBytes = null;
+                await Task.Run(() =>
+                {
+                    audioBytes = string.IsNullOrEmpty(voiceId)
+                        ? entry.Model.RunTts(text)
+                        : entry.Model.RunTts(text, voiceId);
+                });
+                return audioBytes;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[XybridModelService] TTS failed: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                entry.Lock.Release();
+            }
+        }
+
+        // ================================================================
+        // Lifecycle
+        // ================================================================
+
         private void OnDestroy()
         {
-            _model?.Dispose();
-            _model = null;
+            foreach (var entry in _models.Values)
+                entry.Model?.Dispose();
+            _models.Clear();
             _isReady = false;
             if (Instance == this) Instance = null;
+        }
+
+        // ================================================================
+        // Internal
+        // ================================================================
+
+        private class ModelEntry
+        {
+            public Model Model;
+            public XybridModelAsset Asset;
+            public readonly SemaphoreSlim Lock = new SemaphoreSlim(1, 1);
         }
     }
 }

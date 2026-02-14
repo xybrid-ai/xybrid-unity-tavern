@@ -23,4 +23,8 @@ public class NPCIdentity : MonoBehaviour
     [TextArea(6, 12)]
     [Tooltip("Detailed character info for AI: speech style, knowledge, relationships, secrets.")]
     public string extendedPersonality;
+
+    [Header("Voice (TTS)")]
+    [Tooltip("Voice ID from the TTS model's voice catalog (e.g., 'af_heart'). Leave empty for model default.")]
+    public string voiceId;
 }

@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.InputSystem;
@@ -37,6 +38,9 @@ public class DialogueManagerV2 : MonoBehaviour
     [SerializeField] private TMP_Text latencyText;
     [SerializeField] private TMP_Text modelText;
     [SerializeField] private TMP_Text locationText;
+
+    [Header("TTS Audio")]
+    [SerializeField] private TTSAudioPlayer _ttsPlayer;
 
     [Header("Debug")]
     [SerializeField] private NPCDebugPanel npcDebugPanel;
@@ -226,6 +230,9 @@ public class DialogueManagerV2 : MonoBehaviour
         if (conversationHistoryUI != null)
             conversationHistoryUI.AddMessage(npc.npcName, response.Text, isPlayer: false);
 
+        // Fire-and-forget TTS (non-blocking, non-fatal)
+        _ = PlayTTSAsync(response.Text, npc.voiceId);
+
         await ShowPlayerInput();
     }
 
@@ -335,6 +342,9 @@ public class DialogueManagerV2 : MonoBehaviour
         if (conversationHistoryUI != null)
             conversationHistoryUI.AddMessage(_currentNPC.npcName, response.Text, isPlayer: false);
 
+        // Fire-and-forget TTS (non-blocking, non-fatal)
+        _ = PlayTTSAsync(response.Text, _currentNPC.voiceId);
+
         UnlockAndClearInput();
         await ShowPlayerInput();
         _isProcessing = false;
@@ -361,6 +371,29 @@ public class DialogueManagerV2 : MonoBehaviour
         }
         if (sendButton != null)
             sendButton.interactable = true;
+    }
+
+    // ================================================================
+    // TTS playback
+    // ================================================================
+
+    private async Task PlayTTSAsync(string text, string voiceId)
+    {
+        if (_ttsPlayer == null) return;
+
+        var service = XybridModelService.Instance;
+        if (service == null || !service.HasTTSModel) return;
+
+        try
+        {
+            byte[] pcm = await service.RunTTSAsync(text, voiceId);
+            if (pcm != null && pcm.Length > 0)
+                _ttsPlayer.PlayPCM(pcm);
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning($"[DialogueManager] TTS failed (non-fatal): {ex.Message}");
+        }
     }
 
     // ================================================================
@@ -556,6 +589,9 @@ public class DialogueManagerV2 : MonoBehaviour
     {
         if (_typewriterCoroutine != null)
             StopCoroutine(_typewriterCoroutine);
+
+        if (_ttsPlayer != null)
+            _ttsPlayer.Stop();
 
         _currentNPC?.GetComponentInChildren<Animator>()?.SetBool("isTalking", false);
         _currentNPC?.GetComponent<NPCLookAt>()?.StopLookingAtPlayer(returnToOriginal: true);

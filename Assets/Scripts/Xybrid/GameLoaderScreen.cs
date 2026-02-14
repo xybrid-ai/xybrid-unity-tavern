@@ -60,7 +60,7 @@ namespace Tavern.Dialogue
         private async void Start()
         {
             _isLoading = true;
-            _baseStatusText = "Loading AI model";
+            _baseStatusText = "Loading AI models";
 
             if (_statusText != null)
                 _statusText.text = _baseStatusText;
@@ -102,7 +102,7 @@ namespace Tavern.Dialogue
             _isLoading = false;
 
             if (_statusText != null)
-                _statusText.text = "AI model loaded";
+                _statusText.text = "AI models loaded";
 
             ShowStartButton("Enter the Tavern");
         }
