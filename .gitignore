@@ -46,3 +46,4 @@ Thumbs.db
 # Manigest for references
 !Packages/manifest.json
 !Packages/packages-lock.json
+Assets/Scripts/.DS_Store

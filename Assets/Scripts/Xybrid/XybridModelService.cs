@@ -22,6 +22,10 @@ namespace Tavern.Dialogue
         [Tooltip("Drag .xyb model assets here. Supports multiple models (LLM, TTS, etc.)")]
         [SerializeField] private XybridModelAsset[] _modelAssets;
 
+        [Header("GGUF Models")]
+        [Tooltip("Paths to raw GGUF files (relative to StreamingAssets or absolute). Metadata is auto-generated.")]
+        [SerializeField] private string[] _ggufModelPaths;
+
         [Header("Settings")]
         [SerializeField] private bool _persistAcrossScenes = true;
 
@@ -101,6 +105,9 @@ namespace Tavern.Dialogue
 
         private async Task InitializeCoreAsync()
         {
+            var totalSw = System.Diagnostics.Stopwatch.StartNew();
+            Debug.Log("[XybridModelService] Starting initialization...");
+
             // Use model assets if configured
             if (_modelAssets != null && _modelAssets.Length > 0)
             {
@@ -109,7 +116,9 @@ namespace Tavern.Dialogue
 
                 await Task.Run(() =>
                 {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
                     XybridClient.Initialize();
+                    Debug.Log($"[XybridModelService] XybridClient.Initialize() took {sw.ElapsedMilliseconds}ms");
 
                     foreach (var asset in _modelAssets)
                     {
@@ -118,15 +127,36 @@ namespace Tavern.Dialogue
                         string path = asset.GetRuntimePath();
                         Model model;
 
-                        if (!string.IsNullOrEmpty(path) && System.IO.File.Exists(path))
+                        sw.Restart();
+                        switch (asset.sourceType)
                         {
-                            model = XybridClient.LoadModelFromBundle(path);
+                            case ModelSourceType.GgufFile:
+                                Debug.Log($"[XybridModelService] Loading '{asset.modelId}' from GGUF: {path}");
+                                model = XybridClient.LoadModelFromFile(path);
+                                break;
+
+                            case ModelSourceType.Directory:
+                                Debug.Log($"[XybridModelService] Loading '{asset.modelId}' from directory: {path}");
+                                using (var dirLoader = ModelLoader.FromDirectory(path))
+                                    model = dirLoader.Load();
+                                break;
+
+                            case ModelSourceType.Bundle:
+                            default:
+                                bool bundleExists = !string.IsNullOrEmpty(path) && System.IO.File.Exists(path);
+                                if (bundleExists)
+                                {
+                                    Debug.Log($"[XybridModelService] Loading '{asset.modelId}' from bundle: {path}");
+                                    model = XybridClient.LoadModelFromBundle(path);
+                                }
+                                else
+                                {
+                                    Debug.Log($"[XybridModelService] Loading '{asset.modelId}' from registry (bundle not found at: {path})");
+                                    model = XybridClient.LoadModel(asset.modelId);
+                                }
+                                break;
                         }
-                        else
-                        {
-                            // Fall back to registry if bundle not in StreamingAssets
-                            model = XybridClient.LoadModel(asset.modelId);
-                        }
+                        Debug.Log($"[XybridModelService] Loaded '{asset.modelId}' in {sw.ElapsedMilliseconds}ms");
 
                         loaded.Add(new KeyValuePair<string, ModelEntry>(
                             asset.modelId,
@@ -139,14 +169,64 @@ namespace Tavern.Dialogue
                 foreach (var kvp in loaded)
                     _models[kvp.Key] = kvp.Value;
             }
+
+            // Load raw GGUF files (auto-generates metadata from binary header)
+            if (_ggufModelPaths != null && _ggufModelPaths.Length > 0)
+            {
+                var ggufLoaded = new List<KeyValuePair<string, ModelEntry>>();
+
+                await Task.Run(() =>
+                {
+                    if (!XybridClient.IsInitialized)
+                        XybridClient.Initialize();
+
+                    foreach (var rawPath in _ggufModelPaths)
+                    {
+                        if (string.IsNullOrWhiteSpace(rawPath)) continue;
+
+                        // Resolve path: if not absolute, treat as relative to StreamingAssets
+                        string resolvedPath = System.IO.Path.IsPathRooted(rawPath)
+                            ? rawPath
+                            : System.IO.Path.Combine(Application.streamingAssetsPath, rawPath);
+
+                        if (!System.IO.File.Exists(resolvedPath))
+                        {
+                            Debug.LogWarning($"[XybridModelService] GGUF file not found: {resolvedPath}");
+                            continue;
+                        }
+
+                        var sw = System.Diagnostics.Stopwatch.StartNew();
+                        Debug.Log($"[XybridModelService] Loading GGUF: {resolvedPath}");
+
+                        Model model = XybridClient.LoadModelFromFile(resolvedPath);
+                        string modelId = model.ModelId;
+                        Debug.Log($"[XybridModelService] Loaded GGUF '{modelId}' in {sw.ElapsedMilliseconds}ms");
+
+                        ggufLoaded.Add(new KeyValuePair<string, ModelEntry>(
+                            modelId,
+                            new ModelEntry { Model = model, Asset = null, Task = "text-generation" }
+                        ));
+                    }
+                });
+
+                foreach (var kvp in ggufLoaded)
+                    _models[kvp.Key] = kvp.Value;
+            }
+
             // Legacy fallback: single model ID string
             else if (!string.IsNullOrWhiteSpace(_modelId))
             {
                 Model model = null;
                 await Task.Run(() =>
                 {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
                     XybridClient.Initialize();
+                    Debug.Log($"[XybridModelService] XybridClient.Initialize() took {sw.ElapsedMilliseconds}ms");
+
+                    sw.Restart();
+                    Debug.Log($"[XybridModelService] Loading '{_modelId}' from registry...");
                     model = XybridClient.LoadModel(_modelId);
+                    Debug.Log($"[XybridModelService] Loaded '{_modelId}' in {sw.ElapsedMilliseconds}ms");
                 });
                 _models[_modelId] = new ModelEntry { Model = model, Asset = null };
             }
@@ -158,12 +238,16 @@ namespace Tavern.Dialogue
 
             _sdkVersion = XybridClient.Version;
             _isReady = true;
+            totalSw.Stop();
 
             foreach (var kvp in _models)
             {
-                string task = kvp.Value.Asset != null ? kvp.Value.Asset.task : "unknown";
-                Debug.Log($"[XybridModelService] Loaded: {kvp.Key} ({task}), SDK v{_sdkVersion}");
+                string task = kvp.Value.Asset != null
+                    ? kvp.Value.Asset.task
+                    : kvp.Value.Task ?? "unknown";
+                Debug.Log($"[XybridModelService] Ready: {kvp.Key} ({task}), SDK v{_sdkVersion}");
             }
+            Debug.Log($"[XybridModelService] Total initialization took {totalSw.ElapsedMilliseconds}ms");
         }
 
         // ================================================================
@@ -182,8 +266,10 @@ namespace Tavern.Dialogue
         {
             foreach (var kvp in _models)
             {
-                if (kvp.Value.Asset == null) continue;
-                string t = kvp.Value.Asset.task?.ToLowerInvariant() ?? "";
+                // Check asset task (for .xyb models) or Task override (for raw GGUF models)
+                string t = kvp.Value.Asset != null
+                    ? kvp.Value.Asset.task?.ToLowerInvariant() ?? ""
+                    : kvp.Value.Task?.ToLowerInvariant() ?? "";
                 foreach (var taskName in taskNames)
                 {
                     if (t == taskName) return kvp.Value;
@@ -388,6 +474,8 @@ namespace Tavern.Dialogue
         {
             public Model Model;
             public XybridModelAsset Asset;
+            /// <summary>Task override for models loaded without an asset (e.g., raw GGUF).</summary>
+            public string Task;
             public readonly SemaphoreSlim Lock = new SemaphoreSlim(1, 1);
         }
     }
