@@ -29,6 +29,10 @@ namespace Tavern.Dialogue
         [Header("Settings")]
         [SerializeField] private bool _persistAcrossScenes = true;
 
+        [Header("Telemetry (optional)")]
+        [Tooltip("Env var name holding the telemetry API key. Read from project-root .env in Editor, or process env in builds. Leave empty to disable.")]
+        [SerializeField] private string _telemetryApiKeyEnvVar = "xybrid_api_key";
+
         // Legacy fallback — kept for backward compat with existing scenes
         [SerializeField, HideInInspector] private string _modelId;
 
@@ -107,6 +111,9 @@ namespace Tavern.Dialogue
         {
             var totalSw = System.Diagnostics.Stopwatch.StartNew();
             Debug.Log("[XybridModelService] Starting initialization...");
+
+            await Task.Run(() => XybridClient.Initialize());
+            TryInitializeTelemetry();
 
             // Use model assets if configured
             if (_modelAssets != null && _modelAssets.Length > 0)
@@ -454,11 +461,55 @@ namespace Tavern.Dialogue
         }
 
         // ================================================================
+        // Telemetry
+        // ================================================================
+
+        private void TryInitializeTelemetry()
+        {
+            if (string.IsNullOrWhiteSpace(_telemetryApiKeyEnvVar))
+            {
+                Debug.Log("[XybridModelService] Telemetry disabled (no API key env var configured).");
+                return;
+            }
+
+            string apiKey = DotEnv.Get(_telemetryApiKeyEnvVar);
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                Debug.LogWarning($"[XybridModelService] Telemetry disabled: '{_telemetryApiKeyEnvVar}' not found in .env or environment.");
+                return;
+            }
+
+            try
+            {
+                using (var config = new TelemetryConfig(apiKey)
+                    .WithDeviceAttribute("platform", Application.platform.ToString())
+                    .WithBatchSize(32)
+                    .WithFlushInterval(TimeSpan.FromSeconds(30)))
+                {
+                    XybridClient.InitializeTelemetry(config);
+                }
+                Debug.Log("[XybridModelService] Telemetry initialized → ingest.xybrid.dev");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[XybridModelService] Telemetry init failed: {ex.Message}");
+            }
+        }
+
+        // ================================================================
         // Lifecycle
         // ================================================================
 
+        private void OnApplicationPause(bool paused)
+        {
+            if (paused) XybridClient.FlushTelemetry();
+        }
+
         private void OnDestroy()
         {
+            XybridClient.FlushTelemetry();
+            XybridClient.ShutdownTelemetry();
+
             foreach (var entry in _models.Values)
                 entry.Model?.Dispose();
             _models.Clear();
