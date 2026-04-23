@@ -15,7 +15,6 @@ namespace Tavern.Dialogue
     public class XybridDialogueProvider : IDialogueProvider
     {
         private const int MaxHistoryLength = 20;
-        private const string GreetingInput = "A traveler has just approached you. Greet them naturally, in character.";
 
         private readonly XybridModelService _service;
         private WorldLore _worldLore;
@@ -46,18 +45,21 @@ namespace Tavern.Dialogue
         // ================================================================
 
         public Task<DialogueResponse> GetGreetingAsync(NPCIdentity npc)
-            => RunDialogueAsync(npc, GreetingInput);
+            => RunDialogueAsync(npc, GreetingTrigger(npc));
 
         public Task<DialogueResponse> GetResponseAsync(
             NPCIdentity npc, string playerInput, string[] conversationHistory)
             => RunDialogueAsync(npc, playerInput);
 
         public Task<DialogueResponse> GetGreetingStreamingAsync(NPCIdentity npc, Action<string> onToken)
-            => RunDialogueAsync(npc, GreetingInput, onToken);
+            => RunDialogueAsync(npc, GreetingTrigger(npc), onToken);
 
         public Task<DialogueResponse> GetResponseStreamingAsync(
             NPCIdentity npc, string playerInput, string[] conversationHistory, Action<string> onToken)
             => RunDialogueAsync(npc, playerInput, onToken);
+
+        private static string GreetingTrigger(NPCIdentity npc)
+            => $"Now with the information provided, generate {npc.npcName}'s greeting to the user:";
 
         public Task<string[]> GetPlayerOptionsAsync(NPCIdentity npc, int exchangeIndex)
             => Task.FromResult<string[]>(null);
@@ -115,34 +117,64 @@ namespace Tavern.Dialogue
         }
 
         /// <summary>
-        /// Build the system prompt from world context + NPC identity.
-        /// Set once via ConversationContext.SetSystem() — persists across Clear().
+        /// Build the Gemma3NPC-formatted roleplay prompt.
+        /// Emitted via ConversationContext.SetSystem(); the GGUF's jinja chat template
+        /// prepends it to the first user turn with "\n\n", matching the article's
+        /// training-time layout (https://huggingface.co/blog/chimbiwide/gemma3npc).
         /// </summary>
         private string BuildSystemPrompt(NPCIdentity npc)
         {
             var sb = new StringBuilder();
 
-            sb.Append($"You are {npc.npcName}, {npc.description}.");
-            sb.AppendLine($" {npc.personality}.");
+            sb.AppendLine($"Enter Roleplay Mode. You are roleplaying as {npc.npcName}. You must always stay in character.");
+            sb.AppendLine();
+            sb.AppendLine("Your goal is to create an immersive, fun, creative roleplaying experience for the user. You must respond in a way that drives the conversation forward.");
+            sb.AppendLine();
+            sb.AppendLine("Character Persona:");
+            sb.AppendLine($"Name: {npc.npcName}");
+            sb.AppendLine($"Category of your character: {(string.IsNullOrWhiteSpace(npc.category) ? "Villager" : npc.category)}");
+            sb.Append("Description of your character: ");
+            sb.AppendLine(BuildDescription(npc));
+            sb.Append("Definition of your character (contains example chats so that you can better roleplay as the character): ");
+            sb.Append(BuildDefinition(npc));
 
+            return sb.ToString();
+        }
+
+        private string BuildDescription(NPCIdentity npc)
+        {
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(npc.description))
+                sb.Append(npc.description.Trim());
+            if (!string.IsNullOrWhiteSpace(npc.personality))
+            {
+                if (sb.Length > 0) sb.Append(' ');
+                sb.Append(npc.personality.Trim());
+            }
             if (_worldLore != null)
             {
-                string setting = !string.IsNullOrEmpty(_worldLore.settingBrief)
-                    ? _worldLore.settingBrief
-                    : "The Rusty Flagon tavern. Evening, fire crackling.";
-
-                if (!string.IsNullOrEmpty(_worldLore.worldBrief))
-                    sb.AppendLine($"{_worldLore.worldBrief} {setting}");
-                else
-                    sb.AppendLine(setting);
+                string world = _worldLore.worldBrief?.Trim();
+                string setting = _worldLore.settingBrief?.Trim();
+                if (!string.IsNullOrEmpty(world))
+                {
+                    if (sb.Length > 0) sb.Append(' ');
+                    sb.Append(world);
+                }
+                if (!string.IsNullOrEmpty(setting))
+                {
+                    if (sb.Length > 0) sb.Append(' ');
+                    sb.Append(setting);
+                }
             }
+            return sb.ToString();
+        }
 
-            string extendedPersonality = npc.extendedPersonality;
-            if (!string.IsNullOrEmpty(extendedPersonality))
-                sb.AppendLine(extendedPersonality);
-
-            sb.AppendLine("Reply in 1-2 sentences as spoken dialogue only. No quotes, no narration, no actions.");
-
+        private static string BuildDefinition(NPCIdentity npc)
+        {
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(npc.extendedPersonality))
+                sb.AppendLine(npc.extendedPersonality.Trim());
+            sb.Append("Reply in 1-2 sentences as spoken dialogue only. No quotes, no narration, no actions.");
             return sb.ToString();
         }
 

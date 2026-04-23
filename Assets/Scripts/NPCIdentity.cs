@@ -10,6 +10,9 @@ public class NPCIdentity : MonoBehaviour
     [Header("NPC Info")]
     public string npcName = "Unknown";
 
+    [Tooltip("Short role/archetype. Fills the Gemma3NPC 'Category' slot (e.g., 'Barkeeper', 'Martial Arts Master').")]
+    public string category = "Villager";
+
     [TextArea(3, 6)]
     public string description = "A mysterious stranger.";
 
