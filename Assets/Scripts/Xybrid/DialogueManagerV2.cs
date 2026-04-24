@@ -75,6 +75,7 @@ public class DialogueManagerV2 : MonoBehaviour
     private readonly ConcurrentQueue<string> _tokenQueue = new ConcurrentQueue<string>();
     private volatile bool _streamingComplete;
     private volatile bool _insideAsteriskBlock;
+    private volatile bool _emittedNonWhitespace;
 
     private async void Start()
     {
