@@ -21,11 +21,15 @@ public class NPCDebugPanel : MonoBehaviour
     {
         if (debugText == null || npc == null) return;
 
+        var personaAsset = Resources.Load<TextAsset>($"NPCPrompts/{npc.npcName}");
+        string persona = personaAsset != null
+            ? personaAsset.text
+            : $"(no prompt file at Resources/NPCPrompts/{npc.npcName}.md)";
+
         debugText.text =
             $"<b>Name:</b> {npc.npcName}\n\n" +
-            $"<b>Description:</b>\n{npc.description}\n\n" +
-            $"<b>Personality:</b>\n{npc.personality}\n\n" +
-            $"<b>Extended Personality:</b>\n{(string.IsNullOrEmpty(npc.extendedPersonality) ? "(empty)" : npc.extendedPersonality)}";
+            $"<b>Category:</b> {npc.category}\n\n" +
+            $"<b>Persona:</b>\n{persona}";
     }
 
     public void Toggle()

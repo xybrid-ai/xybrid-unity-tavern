@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
@@ -73,6 +74,8 @@ public class DialogueManagerV2 : MonoBehaviour
     // Streaming token queue — filled by background thread, consumed by typewriter coroutine
     private readonly ConcurrentQueue<string> _tokenQueue = new ConcurrentQueue<string>();
     private volatile bool _streamingComplete;
+    private volatile bool _insideAsteriskBlock;
+    private volatile bool _emittedNonWhitespace;
 
     private async void Start()
     {
@@ -222,7 +225,9 @@ public class DialogueManagerV2 : MonoBehaviour
 
         UpdateDemoOverlay(response);
 
-        if (!_provider.SupportsStreaming)
+        if (_provider.SupportsStreaming)
+            ReconcileStreamedText(response.Text);
+        else
             ShowNPCText(response.Text);
 
         _conversationHistory.Add($"{npc.npcName}: {response.Text}");
@@ -333,7 +338,9 @@ public class DialogueManagerV2 : MonoBehaviour
 
         UpdateDemoOverlay(response);
 
-        if (!_provider.SupportsStreaming)
+        if (_provider.SupportsStreaming)
+            ReconcileStreamedText(response.Text);
+        else
             ShowNPCText(response.Text);
 
         _conversationHistory.Add($"{_currentNPC.npcName}: {response.Text}");
@@ -402,13 +409,48 @@ public class DialogueManagerV2 : MonoBehaviour
 
     private void OnStreamToken(string token)
     {
-        if (!string.IsNullOrEmpty(token))
-            _tokenQueue.Enqueue(token);
+        if (string.IsNullOrEmpty(token)) return;
+
+        string filtered = FilterAsteriskNarration(token);
+        if (!string.IsNullOrEmpty(filtered))
+            _tokenQueue.Enqueue(filtered);
+    }
+
+    /// <summary>
+    /// Strips RP-style asterisk-wrapped narration (*action text*) from the token
+    /// stream so it never reaches the dialog panel. State persists across tokens
+    /// because a `*` can land at any byte boundary. Reset via
+    /// <see cref="ClearTokenQueue"/> before each new stream.
+    /// </summary>
+    private string FilterAsteriskNarration(string token)
+    {
+        var sb = new StringBuilder(token.Length);
+        foreach (char c in token)
+        {
+            if (c == '*')
+            {
+                _insideAsteriskBlock = !_insideAsteriskBlock;
+                continue;
+            }
+            if (_insideAsteriskBlock) continue;
+
+            // Suppress leading whitespace so orphaned \n\n between stripped
+            // asterisk blocks doesn't leak as a blank pause before real dialogue.
+            if (!_emittedNonWhitespace)
+            {
+                if (char.IsWhiteSpace(c)) continue;
+                _emittedNonWhitespace = true;
+            }
+            sb.Append(c);
+        }
+        return sb.ToString();
     }
 
     private void ClearTokenQueue()
     {
         while (_tokenQueue.TryDequeue(out _)) { }
+        _insideAsteriskBlock = false;
+        _emittedNonWhitespace = false;
     }
 
     private IEnumerator StreamingTypewriterEffect()
@@ -520,6 +562,23 @@ public class DialogueManagerV2 : MonoBehaviour
         }
 
         _typewriterCoroutine = StartCoroutine(TypewriterEffect(text));
+    }
+
+    /// <summary>
+    /// Replaces the streamed typewriter output with the cleaned final text.
+    /// The raw stream may include narration (asterisk actions, scene-setting)
+    /// that CleanResponse stripped; this keeps the dialog panel in sync with
+    /// the cleaned text that history and TTS use.
+    /// </summary>
+    private void ReconcileStreamedText(string cleanedText)
+    {
+        if (npcDialogueText == null) return;
+        if (npcDialogueText.text == cleanedText) return;
+
+        if (_typewriterCoroutine != null)
+            StopCoroutine(_typewriterCoroutine);
+
+        npcDialogueText.text = cleanedText;
     }
 
     private IEnumerator TypewriterEffect(string text)

@@ -15,7 +15,6 @@ namespace Tavern.Dialogue
     public class XybridDialogueProvider : IDialogueProvider
     {
         private const int MaxHistoryLength = 20;
-        private const string GreetingInput = "A traveler has just approached you. Greet them naturally, in character.";
 
         private readonly XybridModelService _service;
         private WorldLore _worldLore;
@@ -46,18 +45,21 @@ namespace Tavern.Dialogue
         // ================================================================
 
         public Task<DialogueResponse> GetGreetingAsync(NPCIdentity npc)
-            => RunDialogueAsync(npc, GreetingInput);
+            => RunDialogueAsync(npc, GreetingTrigger(npc));
 
         public Task<DialogueResponse> GetResponseAsync(
             NPCIdentity npc, string playerInput, string[] conversationHistory)
             => RunDialogueAsync(npc, playerInput);
 
         public Task<DialogueResponse> GetGreetingStreamingAsync(NPCIdentity npc, Action<string> onToken)
-            => RunDialogueAsync(npc, GreetingInput, onToken);
+            => RunDialogueAsync(npc, GreetingTrigger(npc), onToken);
 
         public Task<DialogueResponse> GetResponseStreamingAsync(
             NPCIdentity npc, string playerInput, string[] conversationHistory, Action<string> onToken)
             => RunDialogueAsync(npc, playerInput, onToken);
+
+        private static string GreetingTrigger(NPCIdentity npc)
+            => $"Now with the information provided, generate {npc.npcName}'s greeting to the user:";
 
         public Task<string[]> GetPlayerOptionsAsync(NPCIdentity npc, int exchangeIndex)
             => Task.FromResult<string[]>(null);
@@ -115,35 +117,53 @@ namespace Tavern.Dialogue
         }
 
         /// <summary>
-        /// Build the system prompt from world context + NPC identity.
-        /// Set once via ConversationContext.SetSystem() — persists across Clear().
+        /// Build the Gemma3NPC-formatted roleplay prompt.
+        /// Emitted via ConversationContext.SetSystem(); the GGUF's jinja chat template
+        /// prepends it to the first user turn with "\n\n", matching the article's
+        /// training-time layout (https://huggingface.co/blog/chimbiwide/gemma3npc).
+        /// The Definition slot is loaded from Assets/Resources/NPCPrompts/{npcName}.md.
         /// </summary>
         private string BuildSystemPrompt(NPCIdentity npc)
         {
+            string category = string.IsNullOrWhiteSpace(npc.category) ? "Villager" : npc.category;
+            string description = BuildDescription(category);
+            string definition = LoadPersona(npc.npcName);
+
             var sb = new StringBuilder();
-
-            sb.Append($"You are {npc.npcName}, {npc.description}.");
-            sb.AppendLine($" {npc.personality}.");
-
-            if (_worldLore != null)
-            {
-                string setting = !string.IsNullOrEmpty(_worldLore.settingBrief)
-                    ? _worldLore.settingBrief
-                    : "The Rusty Flagon tavern. Evening, fire crackling.";
-
-                if (!string.IsNullOrEmpty(_worldLore.worldBrief))
-                    sb.AppendLine($"{_worldLore.worldBrief} {setting}");
-                else
-                    sb.AppendLine(setting);
-            }
-
-            string extendedPersonality = npc.extendedPersonality;
-            if (!string.IsNullOrEmpty(extendedPersonality))
-                sb.AppendLine(extendedPersonality);
-
-            sb.AppendLine("Reply in 1-2 sentences as spoken dialogue only. No quotes, no narration, no actions.");
-
+            sb.AppendLine($"Enter Roleplay Mode. You are roleplaying as {npc.npcName}. You must always stay in character.");
+            sb.AppendLine();
+            sb.AppendLine($"Your goal is to create an immersive, fun, creative roleplaying experience for the user. You must respond in a way that drives the conversation forward. Output ONLY what {npc.npcName} says aloud, in first person, as one or two sentences of direct spoken dialogue. Never narrate the scene or {npc.npcName}'s actions. Never refer to {npc.npcName} in the third person. Never wrap any part of your reply in asterisks, brackets, or quotes.");
+            sb.AppendLine();
+            sb.AppendLine("Character Persona:");
+            sb.AppendLine($"Name: {npc.npcName}");
+            sb.AppendLine($"Category of your character: {category}");
+            sb.AppendLine($"Description of your character: {description}");
+            sb.Append("Definition of your character (contains example chats so that you can better roleplay as the character): ");
+            sb.Append(definition);
             return sb.ToString();
+        }
+
+        private string BuildDescription(string category)
+        {
+            string world = _worldLore?.worldBrief?.Trim();
+            string setting = _worldLore?.settingBrief?.Trim();
+
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(world)) parts.Add(world);
+            if (!string.IsNullOrEmpty(setting)) parts.Add(setting);
+            parts.Add($"A {category}.");
+            return string.Join(" ", parts);
+        }
+
+        private string LoadPersona(string npcName)
+        {
+            var asset = Resources.Load<TextAsset>($"NPCPrompts/{npcName}");
+            if (asset == null || string.IsNullOrWhiteSpace(asset.text))
+            {
+                Debug.LogWarning($"[XybridProvider] No persona found at Resources/NPCPrompts/{npcName}.md — using category-only fallback.");
+                return "(No additional details provided.)";
+            }
+            return asset.text.Trim();
         }
 
         public void ClearNPCContext(string npcName)
@@ -164,6 +184,11 @@ namespace Tavern.Dialogue
             if (string.IsNullOrEmpty(response)) return "...";
 
             response = response.Trim();
+
+            // Strip RP-style action markers: *shuffles behind the bar*
+            response = System.Text.RegularExpressions.Regex
+                .Replace(response, @"\*[^*]*\*", string.Empty)
+                .Trim();
 
             var leakagePatterns = new[] { " says:", " responds:", " replies:" };
             foreach (var pattern in leakagePatterns)
