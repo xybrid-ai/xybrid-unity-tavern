@@ -432,8 +432,16 @@ public class DialogueManagerV2 : MonoBehaviour
                 _insideAsteriskBlock = !_insideAsteriskBlock;
                 continue;
             }
-            if (!_insideAsteriskBlock)
-                sb.Append(c);
+            if (_insideAsteriskBlock) continue;
+
+            // Suppress leading whitespace so orphaned \n\n between stripped
+            // asterisk blocks doesn't leak as a blank pause before real dialogue.
+            if (!_emittedNonWhitespace)
+            {
+                if (char.IsWhiteSpace(c)) continue;
+                _emittedNonWhitespace = true;
+            }
+            sb.Append(c);
         }
         return sb.ToString();
     }
@@ -442,6 +450,7 @@ public class DialogueManagerV2 : MonoBehaviour
     {
         while (_tokenQueue.TryDequeue(out _)) { }
         _insideAsteriskBlock = false;
+        _emittedNonWhitespace = false;
     }
 
     private IEnumerator StreamingTypewriterEffect()
