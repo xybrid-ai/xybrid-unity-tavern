@@ -39,6 +39,7 @@ Thumbs.db
 !Assets/
 !Assets/Scripts/
 !Assets/Scripts/**
+!Assets/Resources/NPCPrompts/**
 
 # Xybrid files
 *.xyb
