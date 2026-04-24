@@ -85,7 +85,7 @@ namespace Tavern.Dialogue
 
             if (response.Success)
             {
-                response.Text = CleanResponse(response.Text, npc.npcName);
+                response.Text = CleanResponse(response.Text);
 
                 // Push the exchange into native context for future turns
                 context.Push(userInput, MessageRole.User);
@@ -121,59 +121,49 @@ namespace Tavern.Dialogue
         /// Emitted via ConversationContext.SetSystem(); the GGUF's jinja chat template
         /// prepends it to the first user turn with "\n\n", matching the article's
         /// training-time layout (https://huggingface.co/blog/chimbiwide/gemma3npc).
+        /// The Definition slot is loaded from Assets/Resources/NPCPrompts/{npcName}.md.
         /// </summary>
         private string BuildSystemPrompt(NPCIdentity npc)
         {
-            var sb = new StringBuilder();
+            string category = string.IsNullOrWhiteSpace(npc.category) ? "Villager" : npc.category;
+            string description = BuildDescription(category);
+            string definition = LoadPersona(npc.npcName);
 
+            var sb = new StringBuilder();
             sb.AppendLine($"Enter Roleplay Mode. You are roleplaying as {npc.npcName}. You must always stay in character.");
             sb.AppendLine();
             sb.AppendLine($"Your goal is to create an immersive, fun, creative roleplaying experience for the user. You must respond in a way that drives the conversation forward. Output ONLY what {npc.npcName} says aloud, in first person, as one or two sentences of direct spoken dialogue. Never narrate the scene or {npc.npcName}'s actions. Never refer to {npc.npcName} in the third person. Never wrap any part of your reply in asterisks, brackets, or quotes.");
             sb.AppendLine();
             sb.AppendLine("Character Persona:");
             sb.AppendLine($"Name: {npc.npcName}");
-            sb.AppendLine($"Category of your character: {(string.IsNullOrWhiteSpace(npc.category) ? "Villager" : npc.category)}");
-            sb.Append("Description of your character: ");
-            sb.AppendLine(BuildDescription(npc));
+            sb.AppendLine($"Category of your character: {category}");
+            sb.AppendLine($"Description of your character: {description}");
             sb.Append("Definition of your character (contains example chats so that you can better roleplay as the character): ");
-            sb.Append(BuildDefinition(npc));
-
+            sb.Append(definition);
             return sb.ToString();
         }
 
-        private string BuildDescription(NPCIdentity npc)
+        private string BuildDescription(string category)
         {
-            var sb = new StringBuilder();
-            if (!string.IsNullOrWhiteSpace(npc.description))
-                sb.Append(npc.description.Trim());
-            if (!string.IsNullOrWhiteSpace(npc.personality))
-            {
-                if (sb.Length > 0) sb.Append(' ');
-                sb.Append(npc.personality.Trim());
-            }
-            if (_worldLore != null)
-            {
-                string world = _worldLore.worldBrief?.Trim();
-                string setting = _worldLore.settingBrief?.Trim();
-                if (!string.IsNullOrEmpty(world))
-                {
-                    if (sb.Length > 0) sb.Append(' ');
-                    sb.Append(world);
-                }
-                if (!string.IsNullOrEmpty(setting))
-                {
-                    if (sb.Length > 0) sb.Append(' ');
-                    sb.Append(setting);
-                }
-            }
-            return sb.ToString();
+            string world = _worldLore?.worldBrief?.Trim();
+            string setting = _worldLore?.settingBrief?.Trim();
+
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(world)) parts.Add(world);
+            if (!string.IsNullOrEmpty(setting)) parts.Add(setting);
+            parts.Add($"A {category}.");
+            return string.Join(" ", parts);
         }
 
-        private static string BuildDefinition(NPCIdentity npc)
+        private string LoadPersona(string npcName)
         {
-            return string.IsNullOrWhiteSpace(npc.extendedPersonality)
-                ? "(No additional details provided.)"
-                : npc.extendedPersonality.Trim();
+            var asset = Resources.Load<TextAsset>($"NPCPrompts/{npcName}");
+            if (asset == null || string.IsNullOrWhiteSpace(asset.text))
+            {
+                Debug.LogWarning($"[XybridProvider] No persona found at Resources/NPCPrompts/{npcName}.md — using category-only fallback.");
+                return "(No additional details provided.)";
+            }
+            return asset.text.Trim();
         }
 
         public void ClearNPCContext(string npcName)
@@ -189,7 +179,7 @@ namespace Tavern.Dialogue
         // Response post-processing
         // ================================================================
 
-        private string CleanResponse(string response, string npcName)
+        private string CleanResponse(string response)
         {
             if (string.IsNullOrEmpty(response)) return "...";
 
@@ -236,49 +226,10 @@ namespace Tavern.Dialogue
                     response = response.Substring(0, 197) + "...";
             }
 
-            if (LooksLikeNarration(response, npcName))
-            {
-                Debug.LogWarning($"[XybridProvider] Narration detected for {npcName}, replacing with ellipsis: {response}");
-                return "...";
-            }
-
             if (string.IsNullOrWhiteSpace(response))
                 return "...";
 
             return response;
-        }
-
-        /// <summary>
-        /// Heuristic: detects third-person scene narration leaked in place of dialogue.
-        /// Two signals fire independently:
-        ///  1. The NPC is referred to by name with no first-person pronouns (clear third-person).
-        ///  2. The reply is long-ish prose that opens with a scene article and mentions
-        ///     environmental nouns (tavern, fire, shadows, etc.) without first-person.
-        /// Short replies like "The ale's fine." are spared even without first-person.
-        /// </summary>
-        private static bool LooksLikeNarration(string response, string npcName)
-        {
-            if (string.IsNullOrWhiteSpace(response)) return false;
-
-            string lower = response.ToLowerInvariant();
-            bool hasFirstPerson =
-                System.Text.RegularExpressions.Regex.IsMatch(
-                    lower, @"\b(i|i'm|i'd|i'll|i've|me|my|mine|we|us|our|ours)\b");
-            if (hasFirstPerson) return false;
-
-            if (!string.IsNullOrEmpty(npcName)
-                && lower.Contains(npcName.ToLowerInvariant()))
-                return true;
-
-            bool opensAsScene =
-                System.Text.RegularExpressions.Regex.IsMatch(
-                    response, @"^(The |A |An )");
-            bool hasSceneNouns =
-                System.Text.RegularExpressions.Regex.IsMatch(
-                    lower,
-                    @"\b(tavern|fire|flame|flames|shadow|shadows|wall|walls|crackl|corner|room|table|tankard|ale|cup|door|hearth|candle|lantern|torch|dust|silhouette|figure)\b");
-
-            return opensAsScene && hasSceneNouns && response.Length > 80;
         }
     }
 }
