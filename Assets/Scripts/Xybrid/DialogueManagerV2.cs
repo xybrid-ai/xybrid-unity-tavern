@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
@@ -73,6 +74,7 @@ public class DialogueManagerV2 : MonoBehaviour
     // Streaming token queue — filled by background thread, consumed by typewriter coroutine
     private readonly ConcurrentQueue<string> _tokenQueue = new ConcurrentQueue<string>();
     private volatile bool _streamingComplete;
+    private volatile bool _insideAsteriskBlock;
 
     private async void Start()
     {
@@ -406,13 +408,39 @@ public class DialogueManagerV2 : MonoBehaviour
 
     private void OnStreamToken(string token)
     {
-        if (!string.IsNullOrEmpty(token))
-            _tokenQueue.Enqueue(token);
+        if (string.IsNullOrEmpty(token)) return;
+
+        string filtered = FilterAsteriskNarration(token);
+        if (!string.IsNullOrEmpty(filtered))
+            _tokenQueue.Enqueue(filtered);
+    }
+
+    /// <summary>
+    /// Strips RP-style asterisk-wrapped narration (*action text*) from the token
+    /// stream so it never reaches the dialog panel. State persists across tokens
+    /// because a `*` can land at any byte boundary. Reset via
+    /// <see cref="ClearTokenQueue"/> before each new stream.
+    /// </summary>
+    private string FilterAsteriskNarration(string token)
+    {
+        var sb = new StringBuilder(token.Length);
+        foreach (char c in token)
+        {
+            if (c == '*')
+            {
+                _insideAsteriskBlock = !_insideAsteriskBlock;
+                continue;
+            }
+            if (!_insideAsteriskBlock)
+                sb.Append(c);
+        }
+        return sb.ToString();
     }
 
     private void ClearTokenQueue()
     {
         while (_tokenQueue.TryDequeue(out _)) { }
+        _insideAsteriskBlock = false;
     }
 
     private IEnumerator StreamingTypewriterEffect()
