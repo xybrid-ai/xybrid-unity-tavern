@@ -222,7 +222,9 @@ public class DialogueManagerV2 : MonoBehaviour
 
         UpdateDemoOverlay(response);
 
-        if (!_provider.SupportsStreaming)
+        if (_provider.SupportsStreaming)
+            ReconcileStreamedText(response.Text);
+        else
             ShowNPCText(response.Text);
 
         _conversationHistory.Add($"{npc.npcName}: {response.Text}");
@@ -333,7 +335,9 @@ public class DialogueManagerV2 : MonoBehaviour
 
         UpdateDemoOverlay(response);
 
-        if (!_provider.SupportsStreaming)
+        if (_provider.SupportsStreaming)
+            ReconcileStreamedText(response.Text);
+        else
             ShowNPCText(response.Text);
 
         _conversationHistory.Add($"{_currentNPC.npcName}: {response.Text}");
@@ -520,6 +524,23 @@ public class DialogueManagerV2 : MonoBehaviour
         }
 
         _typewriterCoroutine = StartCoroutine(TypewriterEffect(text));
+    }
+
+    /// <summary>
+    /// Replaces the streamed typewriter output with the cleaned final text.
+    /// The raw stream may include narration (asterisk actions, scene-setting)
+    /// that CleanResponse stripped; this keeps the dialog panel in sync with
+    /// the cleaned text that history and TTS use.
+    /// </summary>
+    private void ReconcileStreamedText(string cleanedText)
+    {
+        if (npcDialogueText == null) return;
+        if (npcDialogueText.text == cleanedText) return;
+
+        if (_typewriterCoroutine != null)
+            StopCoroutine(_typewriterCoroutine);
+
+        npcDialogueText.text = cleanedText;
     }
 
     private IEnumerator TypewriterEffect(string text)
