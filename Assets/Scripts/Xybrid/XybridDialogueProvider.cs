@@ -85,7 +85,7 @@ namespace Tavern.Dialogue
 
             if (response.Success)
             {
-                response.Text = CleanResponse(response.Text);
+                response.Text = CleanResponse(response.Text, npc.npcName);
 
                 // Push the exchange into native context for future turns
                 context.Push(userInput, MessageRole.User);
@@ -128,7 +128,7 @@ namespace Tavern.Dialogue
 
             sb.AppendLine($"Enter Roleplay Mode. You are roleplaying as {npc.npcName}. You must always stay in character.");
             sb.AppendLine();
-            sb.AppendLine("Your goal is to create an immersive, fun, creative roleplaying experience for the user. You must respond in a way that drives the conversation forward.");
+            sb.AppendLine($"Your goal is to create an immersive, fun, creative roleplaying experience for the user. You must respond in a way that drives the conversation forward. Output ONLY what {npc.npcName} says aloud, in first person, as one or two sentences of direct spoken dialogue. Never narrate the scene or {npc.npcName}'s actions. Never refer to {npc.npcName} in the third person. Never wrap any part of your reply in asterisks, brackets, or quotes.");
             sb.AppendLine();
             sb.AppendLine("Character Persona:");
             sb.AppendLine($"Name: {npc.npcName}");
@@ -171,11 +171,9 @@ namespace Tavern.Dialogue
 
         private static string BuildDefinition(NPCIdentity npc)
         {
-            var sb = new StringBuilder();
-            if (!string.IsNullOrWhiteSpace(npc.extendedPersonality))
-                sb.AppendLine(npc.extendedPersonality.Trim());
-            sb.Append("Reply in 1-2 sentences as spoken dialogue only. No quotes, no narration, no actions.");
-            return sb.ToString();
+            return string.IsNullOrWhiteSpace(npc.extendedPersonality)
+                ? "(No additional details provided.)"
+                : npc.extendedPersonality.Trim();
         }
 
         public void ClearNPCContext(string npcName)
@@ -191,11 +189,16 @@ namespace Tavern.Dialogue
         // Response post-processing
         // ================================================================
 
-        private string CleanResponse(string response)
+        private string CleanResponse(string response, string npcName)
         {
             if (string.IsNullOrEmpty(response)) return "...";
 
             response = response.Trim();
+
+            // Strip RP-style action markers: *shuffles behind the bar*
+            response = System.Text.RegularExpressions.Regex
+                .Replace(response, @"\*[^*]*\*", string.Empty)
+                .Trim();
 
             var leakagePatterns = new[] { " says:", " responds:", " replies:" };
             foreach (var pattern in leakagePatterns)
@@ -233,10 +236,49 @@ namespace Tavern.Dialogue
                     response = response.Substring(0, 197) + "...";
             }
 
+            if (LooksLikeNarration(response, npcName))
+            {
+                Debug.LogWarning($"[XybridProvider] Narration detected for {npcName}, replacing with ellipsis: {response}");
+                return "...";
+            }
+
             if (string.IsNullOrWhiteSpace(response))
                 return "...";
 
             return response;
+        }
+
+        /// <summary>
+        /// Heuristic: detects third-person scene narration leaked in place of dialogue.
+        /// Two signals fire independently:
+        ///  1. The NPC is referred to by name with no first-person pronouns (clear third-person).
+        ///  2. The reply is long-ish prose that opens with a scene article and mentions
+        ///     environmental nouns (tavern, fire, shadows, etc.) without first-person.
+        /// Short replies like "The ale's fine." are spared even without first-person.
+        /// </summary>
+        private static bool LooksLikeNarration(string response, string npcName)
+        {
+            if (string.IsNullOrWhiteSpace(response)) return false;
+
+            string lower = response.ToLowerInvariant();
+            bool hasFirstPerson =
+                System.Text.RegularExpressions.Regex.IsMatch(
+                    lower, @"\b(i|i'm|i'd|i'll|i've|me|my|mine|we|us|our|ours)\b");
+            if (hasFirstPerson) return false;
+
+            if (!string.IsNullOrEmpty(npcName)
+                && lower.Contains(npcName.ToLowerInvariant()))
+                return true;
+
+            bool opensAsScene =
+                System.Text.RegularExpressions.Regex.IsMatch(
+                    response, @"^(The |A |An )");
+            bool hasSceneNouns =
+                System.Text.RegularExpressions.Regex.IsMatch(
+                    lower,
+                    @"\b(tavern|fire|flame|flames|shadow|shadows|wall|walls|crackl|corner|room|table|tankard|ale|cup|door|hearth|candle|lantern|torch|dust|silhouette|figure)\b");
+
+            return opensAsScene && hasSceneNouns && response.Length > 80;
         }
     }
 }
