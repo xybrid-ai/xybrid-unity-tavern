@@ -20,5 +20,9 @@ public class NPCIdentity : MonoBehaviour
     [Tooltip("Voice ID from the TTS model's voice catalog (e.g., 'af_heart'). Leave empty for model default.")]
     public string voiceId;
 
+    [Tooltip("Speech speed multiplier (1.0 = normal, 0.5 = half, 2.0 = double).")]
+    [Range(0.5f, 2.0f)]
+    public float voiceSpeed = 1.0f;
+
     // AI persona is authored in Assets/Resources/NPCPrompts/{npcName}.md and loaded at runtime.
 }

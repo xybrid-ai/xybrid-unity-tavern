@@ -428,7 +428,7 @@ namespace Tavern.Dialogue
         /// Run TTS inference to generate audio from text.
         /// Returns raw PCM bytes (16-bit signed LE, 24kHz, mono), or null on failure.
         /// </summary>
-        public async Task<byte[]> RunTTSAsync(string text, string voiceId = null)
+        public async Task<byte[]> RunTTSAsync(string text, string voiceId = null, double speed = 1.0)
         {
             var entry = GetTTSEntry();
             if (entry == null)
@@ -443,9 +443,13 @@ namespace Tavern.Dialogue
                 byte[] audioBytes = null;
                 await Task.Run(() =>
                 {
-                    audioBytes = string.IsNullOrEmpty(voiceId)
-                        ? entry.Model.RunTts(text)
-                        : entry.Model.RunTts(text, voiceId);
+                    if (string.IsNullOrEmpty(voiceId) && speed == 1.0)
+                        audioBytes = entry.Model.RunTts(text);
+                    else
+                        audioBytes = entry.Model.RunTts(
+                            text,
+                            string.IsNullOrEmpty(voiceId) ? null : voiceId,
+                            speed);
                 });
                 return audioBytes;
             }

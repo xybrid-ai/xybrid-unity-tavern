@@ -236,7 +236,7 @@ public class DialogueManagerV2 : MonoBehaviour
             conversationHistoryUI.AddMessage(npc.npcName, response.Text, isPlayer: false);
 
         // Fire-and-forget TTS (non-blocking, non-fatal)
-        _ = PlayTTSAsync(response.Text, npc.voiceId);
+        _ = PlayTTSAsync(response.Text, npc.voiceId, npc.voiceSpeed);
 
         await ShowPlayerInput();
     }
@@ -350,7 +350,7 @@ public class DialogueManagerV2 : MonoBehaviour
             conversationHistoryUI.AddMessage(_currentNPC.npcName, response.Text, isPlayer: false);
 
         // Fire-and-forget TTS (non-blocking, non-fatal)
-        _ = PlayTTSAsync(response.Text, _currentNPC.voiceId);
+        _ = PlayTTSAsync(response.Text, _currentNPC.voiceId, _currentNPC.voiceSpeed);
 
         UnlockAndClearInput();
         await ShowPlayerInput();
@@ -384,7 +384,7 @@ public class DialogueManagerV2 : MonoBehaviour
     // TTS playback
     // ================================================================
 
-    private async Task PlayTTSAsync(string text, string voiceId)
+    private async Task PlayTTSAsync(string text, string voiceId, float speed = 1.0f)
     {
         if (_ttsPlayer == null) return;
 
@@ -393,7 +393,7 @@ public class DialogueManagerV2 : MonoBehaviour
 
         try
         {
-            byte[] pcm = await service.RunTTSAsync(text, voiceId);
+            byte[] pcm = await service.RunTTSAsync(text, voiceId, speed);
             if (pcm != null && pcm.Length > 0)
                 _ttsPlayer.PlayPCM(pcm);
         }
