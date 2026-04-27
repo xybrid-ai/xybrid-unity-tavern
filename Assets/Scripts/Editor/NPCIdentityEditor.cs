@@ -1,10 +1,13 @@
 using UnityEditor;
 using UnityEngine;
 using Xybrid.ModelAsset;
+using Tavern.Dialogue;
 
 [CustomEditor(typeof(NPCIdentity))]
 public class NPCIdentityEditor : Editor
 {
+    private static string _testPhrase = "Welcome to the Rusty Flagon, traveler.";
+
     public override void OnInspectorGUI()
     {
         serializedObject.Update();
@@ -17,6 +20,67 @@ public class NPCIdentityEditor : Editor
         DrawVoiceIdField(voiceIdProp);
 
         serializedObject.ApplyModifiedProperties();
+
+        DrawVoiceTestHarness((NPCIdentity)target);
+    }
+
+    private void DrawVoiceTestHarness(NPCIdentity npc)
+    {
+        EditorGUILayout.Space(8);
+        EditorGUILayout.LabelField("Voice Test (Play mode)", EditorStyles.boldLabel);
+
+        _testPhrase = EditorGUILayout.TextField("Test Phrase", _testPhrase);
+
+        bool playing = Application.isPlaying;
+        using (new EditorGUI.DisabledScope(!playing))
+        {
+            if (GUILayout.Button("▶ Test Voice"))
+                TestVoice(npc, _testPhrase);
+        }
+
+        if (!playing)
+        {
+            EditorGUILayout.HelpBox("Enter Play mode to test TTS.", MessageType.None);
+            return;
+        }
+
+        var service = XybridModelService.Instance;
+        if (service == null)
+            EditorGUILayout.HelpBox("No XybridModelService instance in scene.", MessageType.Warning);
+        else if (!service.HasTTSModel)
+            EditorGUILayout.HelpBox("No TTS model loaded by XybridModelService.", MessageType.Warning);
+    }
+
+    private static async void TestVoice(NPCIdentity npc, string phrase)
+    {
+        if (string.IsNullOrWhiteSpace(phrase)) return;
+
+        var service = XybridModelService.Instance;
+        if (service == null || !service.HasTTSModel)
+        {
+            Debug.LogWarning("[VoiceTest] No XybridModelService with TTS model in scene.");
+            return;
+        }
+
+        var player = Object.FindFirstObjectByType<TTSAudioPlayer>();
+        if (player == null)
+        {
+            Debug.LogWarning("[VoiceTest] No TTSAudioPlayer in scene.");
+            return;
+        }
+
+        try
+        {
+            byte[] pcm = await service.RunTTSAsync(phrase, npc.voiceId, npc.voiceSpeed);
+            if (pcm != null && pcm.Length > 0)
+                player.PlayPCM(pcm);
+            else
+                Debug.LogWarning("[VoiceTest] TTS returned no audio.");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning($"[VoiceTest] failed: {ex.Message}");
+        }
     }
 
     private void DrawVoiceIdField(SerializedProperty prop)
