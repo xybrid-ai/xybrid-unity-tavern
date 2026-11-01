@@ -1,0 +1,89 @@
+Assets/Scripts/SpectralLipSync.cs
+  s_5502e4c590b55f::t_4d2e9351f14890 100,104
+  s_5502e4c590b55f::t_754019e9ddf05f 113-136,141-144,146-147
+  s_5502e4c590b55f::t_8ccb0b90bf52a1 1-9,12-99,101-103,105-112,137-140,148-253
+  s_5502e4c590b55f::t_a2065e4c50ba47 145
+  s_5502e4c590b55f::t_5458374cec202c 10-11
+Assets/Scripts/Editor/FaceExpressionBaker.cs
+  s_5502e4c590b55f::t_d0b7835ee97aef 241-242
+  s_5502e4c590b55f::t_febfa25cf40132 14
+  s_5502e4c590b55f::t_2728f858388965 300-301,303
+  s_5502e4c590b55f::t_0cdc3d0fdf8656 1-13,15-240,243-299,302,304-382
+Assets/Scripts/NPCFace.cs
+  s_5502e4c590b55f::t_adb2abb0ff29d4 770-775
+  s_5502e4c590b55f::t_a107d725b7cfbc 1-51,54-60,63-67,69-139,141-444,446-461,467-769,776-918,923-1371
+  s_5502e4c590b55f::t_7fe0917476e541 445
+  s_5502e4c590b55f::t_8d70eba3af4f9a 52-53
+  s_5502e4c590b55f::t_e4e01ce297cc70 61-62
+  s_5502e4c590b55f::t_2af50b40f08d0d 462-466
+  s_5502e4c590b55f::t_56e042ccb86b38 919-922
+  s_5502e4c590b55f::t_6cc404ee72940a 140
+  s_5502e4c590b55f::t_c6a95db20cd3d3 68
+Assets/Scripts/Xybrid/DialogueManagerV2.cs
+  s_5502e4c590b55f::t_2b1d114f7f7471 435-439,446,450-462,469-473,481-494
+  s_5502e4c590b55f::t_652b3d45db86b6 760
+  s_5502e4c590b55f::t_39f5c66f0633af 272-273,275
+  s_5502e4c590b55f::t_1f15ec327814a3 744,746-747,755-759
+  s_5502e4c590b55f::t_678241eb2afdad 463-468
+  s_5502e4c590b55f::t_d9027c122d58ad 397-398,400
+  s_de3bd73ec94f7c::t_1246a3a2bdaaba 495-496
+Assets/Scripts/LineEmotion.cs
+  s_5502e4c590b55f::t_02de7b0cfe3b33 1-14,16-93,95-162,175-245
+  s_5502e4c590b55f::t_ddfcc2614d92a4 15
+  s_5502e4c590b55f::t_abcdd4683ba435 94,163-174
+Assets/Scripts/Xybrid/TTSAudioPlayer.cs
+  s_5502e4c590b55f::t_d84a1ac03a5073 9-10,16-22,26-49,52-67,93,95,97-98,103-106,108-117,119-123,131-132,145-148,150-241
+Assets/Scripts/RhubarbLipSync.cs
+  s_5502e4c590b55f::t_7e5ce7f75b6419 75,244,286
+  s_5502e4c590b55f::t_c35f08d0a597df 5
+  s_5502e4c590b55f::t_d7db1952385df4 185-187
+  s_5502e4c590b55f::t_6f4e036a35d926 243
+  s_5502e4c590b55f::t_fe963caf27e7fc 269-270,272-273,276-282,284-285,289-290
+  s_5502e4c590b55f::t_a988b45fa59609 1-4,6-28,30-31,33-74,76-184,188-242,245-266,274-275,283,287-288,291-477,484-536
+  s_5502e4c590b55f::t_6dacc1d3dce99c 478-483
+  s_5502e4c590b55f::t_5ee31fa446a910 29,32
+  s_5502e4c590b55f::t_def96afac22914 267-268,271
+Assets/Scripts/FaceExpressionLibrary.cs
+  s_5502e4c590b55f::t_dad313b5e1ca0b 1-77
+Assets/Scripts/Editor/FaceExpressionBaker.cs.meta
+  s_de3bd73ec94f7c::t_6d534379b37fb1 1-2
+Assets/Scripts/FaceExpressionLibrary.cs.meta
+  s_de3bd73ec94f7c::t_2e473770ae76ed 1-2
+Assets/Scripts/LineEmotion.cs.meta
+  s_de3bd73ec94f7c::t_2dafcf95afb08b 1-2
+Assets/Scripts/NPCFace.cs.meta
+  s_de3bd73ec94f7c::t_5fcdae66161a73 1-2
+Assets/Scripts/RhubarbLipSync.cs.meta
+  s_de3bd73ec94f7c::t_01b97d79dd2634 1-2
+Assets/Scripts/SpectralLipSync.cs.meta
+  s_de3bd73ec94f7c::t_06875e1a141da0 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "8a5544a20d1d8b6e4fc2d97023bc8e012697fbc2",
+  "prompts": {},
+  "humans": {
+    "h_92edd19a2533f1": {
+      "author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_5502e4c590b55f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cea3b300-d521-4c3d-9d9a-f849f9a0378a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_de3bd73ec94f7c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d1ada83e-8423-4feb-afbf-43b3f166d3fb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
