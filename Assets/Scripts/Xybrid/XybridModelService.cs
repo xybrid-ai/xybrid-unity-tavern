@@ -220,8 +220,9 @@ namespace Tavern.Dialogue
                     _models[kvp.Key] = kvp.Value;
             }
 
-            // Legacy fallback: single model ID string
-            else if (!string.IsNullOrWhiteSpace(_modelId))
+            // Legacy fallback: single model ID string. Only when nothing above loaded a model,
+            // otherwise it downloads an extra LLM from the registry on top of the configured assets.
+            else if (_models.Count == 0 && !string.IsNullOrWhiteSpace(_modelId))
             {
                 Model model = null;
                 await Task.Run(() =>
@@ -237,7 +238,7 @@ namespace Tavern.Dialogue
                 });
                 _models[_modelId] = new ModelEntry { Model = model, Asset = null };
             }
-            else
+            else if (_models.Count == 0)
             {
                 throw new InvalidOperationException(
                     "No model assets assigned. Configure Model Assets in the Inspector on XybridModelService.");
@@ -398,7 +399,10 @@ namespace Tavern.Dialogue
                 });
 
                 if (error != null)
+                {
+                    Debug.LogWarning($"[XybridModelService] Streaming inference returned an error: {error}");
                     return DialogueResponse.FromError(error);
+                }
 
                 return new DialogueResponse
                 {
