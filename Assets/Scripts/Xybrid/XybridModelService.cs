@@ -468,6 +468,75 @@ namespace Tavern.Dialogue
             }
         }
 
+        /// <summary>A synthesized line: PCM plus per-phoneme timings when the TTS model reports them.</summary>
+        public sealed class TtsLine
+        {
+            /// <summary>Raw PCM (16-bit signed LE, mono, the model's sample rate).</summary>
+            public byte[] Pcm;
+            /// <summary>
+            /// Phoneme spans in seconds from the first sample, or null when there are none: a model without a
+            /// duration output (stock Kokoro), or an SDK without phoneme timings (XYBRID_PHONEME_TIMINGS undefined).
+            /// </summary>
+            public PhonemeSpan[] Phonemes;
+        }
+
+        /// <summary>
+        /// Like <see cref="RunTTSAsync"/>, but also returns per-phoneme timings for exact lip sync.
+        /// Returns null on failure.
+        /// </summary>
+        public async Task<TtsLine> RunTTSWithTimingsAsync(string text, string voiceId = null, double speed = 1.0)
+        {
+            var entry = GetTTSEntry();
+            if (entry == null)
+            {
+                Debug.LogWarning("[XybridModelService] No TTS model loaded");
+                return null;
+            }
+
+            await entry.Lock.WaitAsync();
+            try
+            {
+                TtsLine line = null;
+                await Task.Run(() =>
+                {
+                    Envelope envelope = string.IsNullOrEmpty(voiceId) && speed == 1.0
+                        ? Envelope.Text(text)
+                        : Envelope.Text(text, string.IsNullOrEmpty(voiceId) ? null : voiceId, speed);
+                    using (InferenceResult result = entry.Model.Run(envelope))
+                    {
+                        result.ThrowIfFailed();
+                        if (!result.HasAudio)
+                            throw new InvalidOperationException($"TTS produced no audio (output: {result.OutputType})");
+                        line = new TtsLine { Pcm = result.AudioBytes, Phonemes = CopyPhonemes(result) };
+                    }
+                });
+                return line;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[XybridModelService] TTS failed: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                entry.Lock.Release();
+            }
+        }
+
+        private static PhonemeSpan[] CopyPhonemes(InferenceResult result)
+        {
+#if XYBRID_PHONEME_TIMINGS
+            var timings = result.PhonemeTimings;
+            if (timings == null || timings.Count == 0) return null;
+            var spans = new PhonemeSpan[timings.Count];
+            for (int i = 0; i < timings.Count; i++)
+                spans[i] = new PhonemeSpan { phoneme = timings[i].Phoneme, start = timings[i].Start, end = timings[i].End };
+            return spans;
+#else
+            return null;
+#endif
+        }
+
         // ================================================================
         // Telemetry
         // ================================================================

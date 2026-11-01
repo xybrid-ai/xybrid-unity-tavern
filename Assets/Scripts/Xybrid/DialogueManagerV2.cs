@@ -434,7 +434,8 @@ public class DialogueManagerV2 : MonoBehaviour
 
     /// <summary>
     /// Synthesizes and plays <paramref name="text"/> in <paramref name="npc"/>'s voice, positioned at their head.
-    /// Their NPCFace (if any) lip-syncs from loudness right away, then from Rhubarb visemes once analysed.
+    /// Their NPCFace (if any) lip-syncs from the model's phoneme timings when it reports them; otherwise from
+    /// the clip's spectrum right away, then from Rhubarb visemes once analysed.
     /// </summary>
     private async Task PlayTTSAsync(NPCIdentity npc, string text, string voiceId, float speed = 1.0f)
     {
@@ -446,19 +447,27 @@ public class DialogueManagerV2 : MonoBehaviour
         int session = _dialogueSession;
         try
         {
-            byte[] pcm = await service.RunTTSAsync(text, voiceId, speed);
+            XybridModelService.TtsLine line = await service.RunTTSWithTimingsAsync(text, voiceId, speed);
             // Dialogue closed (and maybe another opened) while synthesizing: stay silent
             if (session != _dialogueSession || _ttsPlayer == null) return;
-            if (pcm == null || pcm.Length == 0) return;
+            if (line == null || line.Pcm == null || line.Pcm.Length == 0) return;
 
             _ttsPlayer.SetSpeaker(npc != null ? npc.transform : null);
-            AudioClip clip = _ttsPlayer.PlayPCM(pcm);
+            AudioClip clip = _ttsPlayer.PlayPCM(line.Pcm);
             if (clip == null || npc == null) return;
 
             // Explicit null checks rather than ?. : a destroyed face must not be called
             NPCFace face = npc.GetComponentInChildren<NPCFace>();
             if (face == null) return;
             face.Speak(_ttsPlayer.Source, clip, text);
+
+            // Exact visemes from the phonemes the model actually spoke; null if it reported none or they don't fit
+            LipSyncCue[] phonemeCues = PhonemeLipSync.FromPhonemes(line.Phonemes, clip.length);
+            if (phonemeCues != null)
+            {
+                face.SetLipSyncCues(clip, phonemeCues);
+                return;
+            }
 
             // Instant in-engine visemes from the clip's spectrum (works everywhere); Rhubarb, when it
             // can run (it's x86_64-only on macOS), refines them a moment later
