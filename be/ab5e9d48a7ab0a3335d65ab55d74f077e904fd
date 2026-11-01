@@ -1,0 +1,28 @@
+Assets/Scripts/Xybrid/DialogueManagerV2.cs
+  s_5502e4c590b55f::t_df45e2fd87c301 59-60
+  s_5502e4c590b55f::t_480def89058b2b 467
+  s_5502e4c590b55f::t_cd06e77267ffae 470
+Assets/Scripts/PhonemeLipSync.cs
+  s_5502e4c590b55f::t_db6add52810f27 78-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "beab5e9d48a7ab0a3335d65ab55d74f077e904fd",
+  "prompts": {},
+  "humans": {
+    "h_92edd19a2533f1": {
+      "author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_5502e4c590b55f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cea3b300-d521-4c3d-9d9a-f849f9a0378a",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
