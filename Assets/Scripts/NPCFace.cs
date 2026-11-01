@@ -105,6 +105,12 @@ public class NPCFace : MonoBehaviour
     [SerializeField, Range(0f, 1f)] private float doubleBlinkChance = 0.15f;
 
     [Header("Mouth")]
+    [Tooltip("Scales every mouth layer (lip-sync cues, loudness jaw, babble). Stylised faces and beards read as " +
+             "over-acted above ~0.6.")]
+    [SerializeField, Range(0f, 1f)] private float mouthAmplitude = 0.55f;
+    [Tooltip("Opening shapes are scaled by the line's loudness at that moment, from this floor (quiet) to 1 (loud), " +
+             "so soft syllables and word ends nearly close instead of holding the cue pose.")]
+    [SerializeField, Range(0f, 1f)] private float quietOpenFloor = 0.25f;
     [Tooltip("jawOpen at full loudness while TTS audio plays without Rhubarb cues (yet).")]
     [SerializeField] private float loudnessJaw = 0.55f;
     [Tooltip("Mouth movement while the Animator's isTalking is on but no audio plays for this face (table chatter).")]
@@ -976,18 +982,28 @@ public class NPCFace : MonoBehaviour
             float level = LoudnessAt(t) * (1f - cueMix);
             float drift = Mathf.PerlinNoise(_noiseSeed, t * 2.3f) * 2f - 1f;
             float stretch = level * 0.12f * Mathf.Max(0f, drift);
-            _mouthTarget[MJaw] += loudnessJaw * level;
-            _mouthTarget[MStretchL] += stretch;
-            _mouthTarget[MStretchR] += stretch;
-            _mouthTarget[MFunnel] += level * 0.18f * Mathf.Max(0f, -drift);
+            _mouthTarget[MJaw] += loudnessJaw * level * mouthAmplitude;
+            _mouthTarget[MStretchL] += stretch * mouthAmplitude;
+            _mouthTarget[MStretchR] += stretch * mouthAmplitude;
+            _mouthTarget[MFunnel] += level * 0.18f * Mathf.Max(0f, -drift) * mouthAmplitude;
         }
 
         if (cueMix > 0f)
         {
             EvaluateCues(t, out int previous, out int current, out float blend);
+            // Cues say which shape; loudness says how far open. Closing shapes (M/B/P press) keep full strength
+            float open = Mathf.Lerp(quietOpenFloor, 1f, LoudnessAt(t)) * mouthAmplitude;
             for (int m = 0; m < MouthCount; m++)
-                _mouthTarget[m] += Mathf.Lerp(CuePoses[previous, m], CuePoses[current, m], blend) * cueMix;
+            {
+                float pose = Mathf.Lerp(CuePoses[previous, m], CuePoses[current, m], blend);
+                _mouthTarget[m] += pose * cueMix * (IsClosingShape(m) ? 1f : open);
+            }
         }
+    }
+
+    private static bool IsClosingShape(int mouthShape)
+    {
+        return mouthShape == MClose || mouthShape == MPressL || mouthShape == MPressR;
     }
 
     /// <summary>The cue at time t and the one before it, with a 40 ms blend between them (ported from XybridAvatarPlayer).</summary>
@@ -1185,7 +1201,7 @@ public class NPCFace : MonoBehaviour
 
         float amount = open * _syllableAmp * babbleAmount * fade;
         for (int m = 0; m < MouthCount; m++)
-            _mouthTarget[m] += CuePoses[_syllableShape, m] * amount;
+            _mouthTarget[m] += CuePoses[_syllableShape, m] * amount * (IsClosingShape(m) ? 1f : mouthAmplitude);
     }
 
     private void NextSyllable(float now)

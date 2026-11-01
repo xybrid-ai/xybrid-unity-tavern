@@ -17,8 +17,8 @@ public static class SpectralLipSync
     private const float HopSeconds = 0.01f;
     private const int WindowSize = 512;                 // ~21 ms at 24 kHz
     private const float VoiceBandMin = 80f, VoiceBandMax = 3000f, HighBandMin = 3000f, HighBandMax = 8000f;
-    private const float SpeechGate = 0.08f;             // Normalised loudness below this is silence
-    private const float ClosureMaxSeconds = 0.07f;      // Silences this short inside speech read as M/B/P
+    private const float SpeechGate = 0.12f;             // Normalised loudness below this is silence
+    private const float ClosureMaxSeconds = 0.1f;       // Silences this short inside speech read as M/B/P
     private const float MinCueSeconds = 0.04f;
 
     /// <summary>Analyses a readable clip (e.g. one made by TTSAudioPlayer.PCMToAudioClip). Main thread only.</summary>
