@@ -80,6 +80,12 @@ public class PlayerInteraction : MonoBehaviour
 
     private void StartDialogue()
     {
+        // V2 can't open yet (model still loading, or a previous dialogue still winding down):
+        // don't freeze the player for a dialogue that will never show
+        DialogueManagerV2 dialogueManagerV2 = FindFirstObjectByType<DialogueManagerV2>();
+        if (dialogueManagerV2 != null && !dialogueManagerV2.CanStartDialogue)
+            return;
+
         _inDialogue = true;
         interactAction.Disable();
 
@@ -87,7 +93,6 @@ public class PlayerInteraction : MonoBehaviour
             interactionPrompt.SetActive(false);
 
         // Try V2 first, fall back to V1
-        DialogueManagerV2 dialogueManagerV2 = FindFirstObjectByType<DialogueManagerV2>();
         if (dialogueManagerV2 != null)
         {
             dialogueManagerV2.StartDialogue(currentNPC);

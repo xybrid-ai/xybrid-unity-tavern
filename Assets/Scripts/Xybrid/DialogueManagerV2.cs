@@ -16,6 +16,20 @@ using Tavern.Dialogue;
 /// </summary>
 public class DialogueManagerV2 : MonoBehaviour
 {
+    // ================================================================
+    // Dialogue events (consumed by ambient NPC behaviours: wanderers,
+    // table conversations, awareness)
+    // ================================================================
+
+    /// <summary>Raised once the NPC has been set up to face the player at dialogue start.</summary>
+    public static event System.Action<NPCIdentity> DialogueStarted;
+
+    /// <summary>Raised when dialogue closes, before the current NPC reference is released.</summary>
+    public static event System.Action<NPCIdentity> DialogueEnded;
+
+    /// <summary>The NPC currently in dialogue with the player, or null when no dialogue is open.</summary>
+    public static NPCIdentity ActiveNPC { get; private set; }
+
     [Header("Provider Settings")]
     [SerializeField] private bool useAIDialogue = false;
     [SerializeField] private WorldLore worldLore;
@@ -69,6 +83,10 @@ public class DialogueManagerV2 : MonoBehaviour
     private List<string> _conversationHistory = new List<string>();
     private bool _isProcessing;
     private bool _isDialogueOpen;
+    private int _dialogueSession;   // Bumped on start/end so late async continuations can tell they're stale
+
+    /// <summary>False while the provider is still loading or another dialogue is open/processing.</summary>
+    public bool CanStartDialogue => _provider != null && !_isProcessing && !_isDialogueOpen;
     private CanvasGroup _panelCanvasGroup;
 
     // Streaming token queue — filled by background thread, consumed by typewriter coroutine
@@ -168,8 +186,9 @@ public class DialogueManagerV2 : MonoBehaviour
 
     public async void StartDialogue(NPCIdentity npc)
     {
-        if (_isProcessing || _isDialogueOpen) return;
+        if (!CanStartDialogue) return;
         _isDialogueOpen = true;
+        int session = ++_dialogueSession;
 
         _currentNPC = npc;
         _currentExchangeIndex = 0;
@@ -184,7 +203,14 @@ public class DialogueManagerV2 : MonoBehaviour
         if (npcDebugPanel != null)
             npcDebugPanel.Show(npc);
 
-        npc.GetComponent<NPCLookAt>()?.StartLookingAtPlayer();
+        // TryGetComponent: in the Editor GetComponent returns a "fake null" that `?.` doesn't catch,
+        // which would throw for NPCs without NPCLookAt and skip DialogueStarted below
+        if (npc.TryGetComponent(out NPCLookAt npcLookAt))
+            npcLookAt.StartLookingAtPlayer();
+
+        // Let ambient behaviours (wanderers, table chatter, awareness) react
+        ActiveNPC = npc;
+        RaiseDialogueEvent(DialogueStarted, npc);
 
         var cameraFocus = FindFirstObjectByType<DialogueCameraFocus>();
         cameraFocus?.FocusOn(npc.transform);
@@ -200,7 +226,11 @@ public class DialogueManagerV2 : MonoBehaviour
                 _streamingComplete = false;
                 _typewriterCoroutine = StartCoroutine(StreamingTypewriterEffect());
 
-                response = await _provider.GetGreetingStreamingAsync(npc, OnStreamToken);
+                response = await _provider.GetGreetingStreamingAsync(npc, token =>
+                {
+                    if (session == _dialogueSession) OnStreamToken(token);
+                });
+                if (session != _dialogueSession) return;
                 _streamingComplete = true;
             }
             else
@@ -210,10 +240,14 @@ public class DialogueManagerV2 : MonoBehaviour
         }
         catch (System.Exception ex)
         {
+            if (session != _dialogueSession) return;
             Debug.LogError($"[DialogueManager] Greeting failed: {ex.Message}");
             _streamingComplete = true;
             response = DialogueResponse.FromError(ex.Message);
         }
+
+        // Dialogue was closed (and maybe another opened) while the greeting was generating
+        if (session != _dialogueSession) return;
 
         SetThinking(false);
 
@@ -269,6 +303,7 @@ public class DialogueManagerV2 : MonoBehaviour
     private async System.Threading.Tasks.Task ProcessPlayerInput(string playerInput, int optionIndex)
     {
         _isProcessing = true;
+        int session = _dialogueSession;
         _conversationHistory.Add($"Player: {playerInput}");
 
         if (conversationHistoryUI != null)
@@ -293,7 +328,11 @@ public class DialogueManagerV2 : MonoBehaviour
                         _currentNPC,
                         playerInput,
                         _conversationHistory.ToArray(),
-                        OnStreamToken);
+                        token =>
+                        {
+                            if (session == _dialogueSession) OnStreamToken(token);
+                        });
+                    if (session != _dialogueSession) return;
                     _streamingComplete = true;
                 }
                 else
@@ -320,10 +359,14 @@ public class DialogueManagerV2 : MonoBehaviour
         }
         catch (System.Exception ex)
         {
+            if (session != _dialogueSession) return;
             Debug.LogError($"[DialogueManager] Response failed: {ex.Message}");
             _streamingComplete = true;
             response = DialogueResponse.FromError(ex.Message);
         }
+
+        // Dialogue was closed mid-inference: EndDialogue already reset state, leave it alone
+        if (session != _dialogueSession) return;
 
         SetThinking(false);
 
@@ -354,7 +397,8 @@ public class DialogueManagerV2 : MonoBehaviour
 
         UnlockAndClearInput();
         await ShowPlayerInput();
-        _isProcessing = false;
+        if (session == _dialogueSession)
+            _isProcessing = false;
     }
 
     // ================================================================
@@ -652,8 +696,16 @@ public class DialogueManagerV2 : MonoBehaviour
         if (_ttsPlayer != null)
             _ttsPlayer.Stop();
 
-        _currentNPC?.GetComponentInChildren<Animator>()?.SetBool("isTalking", false);
-        _currentNPC?.GetComponent<NPCLookAt>()?.StopLookingAtPlayer(returnToOriginal: true);
+        var npcAnimator = _currentNPC != null ? _currentNPC.GetComponentInChildren<Animator>() : null;
+        if (npcAnimator != null)
+        {
+            npcAnimator.SetBool("isTalking", false);
+            npcAnimator.SetBool("isThinking", false);
+        }
+        // TryGetComponent (not GetComponent?.) so a missing NPCLookAt can't abort EndDialogue
+        // before ActiveNPC is cleared and DialogueEnded is raised
+        if (_currentNPC != null && _currentNPC.TryGetComponent(out NPCLookAt npcLookAt))
+            npcLookAt.StopLookingAtPlayer(returnToOriginal: true);
 
         var cameraFocus = FindFirstObjectByType<DialogueCameraFocus>();
         cameraFocus?.Unfocus();
@@ -666,6 +718,16 @@ public class DialogueManagerV2 : MonoBehaviour
 
         HidePanel();
         _isDialogueOpen = false;
+        // Invalidate in-flight greeting/response continuations so they can't touch the next dialogue
+        _dialogueSession++;
+        _isProcessing = false;
+
+        // Notify ambient behaviours before the NPC reference is released
+        NPCIdentity endedNPC = _currentNPC;
+        ActiveNPC = null;
+        if (endedNPC != null)
+            RaiseDialogueEvent(DialogueEnded, endedNPC);
+
         _currentNPC = null;
         _conversationHistory.Clear();
         ClearTokenQueue();
@@ -711,6 +773,39 @@ public class DialogueManagerV2 : MonoBehaviour
 
         if (deactivateOnComplete && targetAlpha == 0f)
             dialoguePanel.SetActive(false);
+    }
+
+    /// <summary>
+    /// Invokes each subscriber in isolation so one faulty listener can't block
+    /// the others or abort the dialogue flow.
+    /// </summary>
+    private static void RaiseDialogueEvent(System.Action<NPCIdentity> handlers, NPCIdentity npc)
+    {
+        if (handlers == null) return;
+
+        foreach (System.Delegate handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((System.Action<NPCIdentity>)handler)(npc);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Clears static dialogue state on play-mode entry (needed when domain reload is disabled).
+    /// Runs before any Awake/OnEnable, so subscribers re-register afterwards.
+    /// </summary>
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStatics()
+    {
+        ActiveNPC = null;
+        DialogueStarted = null;
+        DialogueEnded = null;
     }
 
     private void OnDestroy()
