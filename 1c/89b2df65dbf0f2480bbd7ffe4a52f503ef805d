@@ -1,0 +1,39 @@
+Assets/Scripts/Xybrid/XybridModelService.cs
+  s_5502e4c590b55f::t_3ba7b80fe2500c 440
+  s_5502e4c590b55f::t_3f6a2818853c3c 439
+  s_5502e4c590b55f::t_668736b309ce7f 482,484-487
+  s_5502e4c590b55f::t_d4ecf96d703d94 434-435,460-463,466,469
+  s_5502e4c590b55f::t_8ec61ea573ae45 452
+Assets/Scripts/NPCIdentity.cs
+  s_5502e4c590b55f::t_4214cb4c777a9e 23
+  s_5502e4c590b55f::t_3c423a459d9219 20
+Assets/Scripts/Xybrid/DialogueManagerV2.cs
+  s_5502e4c590b55f::t_263b8161ea8db8 437-438
+  s_5502e4c590b55f::t_b004baabe6b591 450,453,456,464-465
+  s_5502e4c590b55f::t_70205e8ceefa24 475
+Assets/Scripts/RhubarbLipSync.cs
+  s_5502e4c590b55f::t_2e74a3dd8fe5ba 186
+  s_5502e4c590b55f::t_f4866064caf737 481-482
+  s_5502e4c590b55f::t_f0e6b502ae7787 14-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1c89b2df65dbf0f2480bbd7ffe4a52f503ef805d",
+  "prompts": {},
+  "humans": {
+    "h_92edd19a2533f1": {
+      "author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_5502e4c590b55f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cea3b300-d521-4c3d-9d9a-f849f9a0378a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
