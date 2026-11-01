@@ -1,0 +1,139 @@
+Assets/Scripts/NPCAnimationSetup.cs
+  s_5502e4c590b55f::t_bced464d6922c6 1,6-8,25-34,50,52,54-56,89-92,96-99,101-104,106-107,109-128,130-139,141
+  s_5502e4c590b55f::t_e390c4e1a42bbf 35-37,40-46,48
+  s_5502e4c590b55f::t_3b9e90694d949a 53,57-88
+Assets/Scripts/NPCIdleLife.cs
+  s_5502e4c590b55f::t_4fd58809eb6fdf 114-116
+  s_5502e4c590b55f::t_ebcdb7a56f81c3 187-189
+  s_5502e4c590b55f::t_c467ce5a30d3d5 1-35,37-107,109-113,117-148,150-186,190-222,224-299
+  s_5502e4c590b55f::t_906ee0af3d32b7 36
+  s_5502e4c590b55f::t_e3276a6cbac48c 108
+  s_5502e4c590b55f::t_d9d231f26fc1a5 149
+  s_5502e4c590b55f::t_3a85289a9462b4 223
+Assets/Scripts/Editor/SidekickExport.cs
+  s_5502e4c590b55f::t_f70b52798fe06e 1-86,99-229
+  s_5502e4c590b55f::t_bf9e26971ff93a 87-98
+Assets/Scripts/Lightflicker.cs
+  s_5502e4c590b55f::t_0a5547d45d8de6 5-7,13-15,20-33,37-39,52-56,61-69,71-72,74-78,84-94
+Assets/Scripts/TableConversation.cs
+  s_5502e4c590b55f::t_7b5e4e252a652f 53
+  s_5502e4c590b55f::t_d4325a4b68f031 510-511,513
+  s_5502e4c590b55f::t_2c4e1042e4baf9 424-428
+  s_5502e4c590b55f::t_804a12e18b0a78 161
+  s_5502e4c590b55f::t_fe72241e68c958 1-52,54-160,162-423,429-509,512,514-668
+Assets/Scripts/NPCLookAt.cs
+  s_5502e4c590b55f::t_a8dcdb1c3be008 189
+  s_5502e4c590b55f::t_e93113a4529c5d 33,36
+  s_5502e4c590b55f::t_02d74c7d159456 443,453,455-456,458-462,464-468,470-471,475,480-482,484,486-496,499-501
+  s_5502e4c590b55f::t_bb7c997f4b1f2c 483
+  s_5502e4c590b55f::t_44de95c972ae0d 4-5,7-19,22-25,28-32,34-35,38-69,74-79,81-83,85-104,106-116,118-119,121-124,132-170,172-173,176-188,191-192,196-200,202,204-211,213-214,216-226,228-234,236-244,247,249-259,261-270,272-274,276-320,323-327,329-347,349-354,356-366,368-371,373-378,380,383-389,391-392,396-397,399,401-405,407,409-410,412-425,433-436,438,441,444,446,448,450-452,457,463,485,497,502-537,539
+  s_5502e4c590b55f::t_99bf6034c1f100 426-432,437
+  s_5502e4c590b55f::t_0797393d154f1e 126-131
+  s_5502e4c590b55f::t_f167f658f7583c 469
+  s_5502e4c590b55f::t_eb4949bbb57c45 20-21
+Assets/Scripts/NPCAwareness.cs
+  s_5502e4c590b55f::t_65e52b200633c5 402-403
+  s_5502e4c590b55f::t_d49f8286772f78 67
+  s_5502e4c590b55f::t_0d1b4d19c78263 1,3,6-14,21-22,30,46-66,68-71,73-77,80-84,87-122,127,130-140,145-150,152-154,156-164,166-167,169-193,195-201,203,205-220,222-250,253,255,257-258,260,262-283,286,288-293,296,298-300,302-321,323-343,351-358,360-364,366-380,386-388,392-393,395-397,399,401,405,409-413,417-435,437,439-450,452-454,456-457,459-552,570-579,581
+  s_5502e4c590b55f::t_85795d67dfcfa3 381-385,390-391,398,400,404,406-408,416
+  s_5502e4c590b55f::t_aeaaa8e1e7e3fe 389
+  s_5502e4c590b55f::t_4d22a38c658d82 414
+Assets/Scripts/Xybrid/DialogueCameraFocus.cs
+  s_5502e4c590b55f::t_840bd30eebef35 72
+  s_5502e4c590b55f::t_32ec07da14e20d 17,21
+  s_5502e4c590b55f::t_7741f945e99dbe 86-100
+  s_5502e4c590b55f::t_9058d0b623ddd9 50-54
+Assets/Scripts/NPCWanderer.cs
+  s_5502e4c590b55f::t_c2cce24a7fbbb9 446-452
+  s_5502e4c590b55f::t_3bfbacd0d84d67 95
+  s_5502e4c590b55f::t_6ac2857e80143c 903-910
+  s_5502e4c590b55f::t_4d9c952a3dcd11 687-696
+  s_5502e4c590b55f::t_2477d359855889 79
+  s_5502e4c590b55f::t_6ab5a8065d4b3e 412-413,416-425
+  s_5502e4c590b55f::t_5ab53b076a9230 1-78,80-94,96-110,112-389,391-411,414-415,426-445,453-686,697-902,911-970
+  s_5502e4c590b55f::t_55687f6e25287f 111
+  s_5502e4c590b55f::t_0f0ec16ae694c3 390
+Assets/Scripts/Xybrid/DialogueManagerV2.cs
+  s_5502e4c590b55f::t_85f7ed29a7fcef 724-730
+  s_5502e4c590b55f::t_53990c5cc6d1c4 229-233,243,249-250
+  s_5502e4c590b55f::t_56bf4671b78ecf 86-89
+  s_5502e4c590b55f::t_54180645b029a7 400-401
+  s_5502e4c590b55f::t_7fe2e3a7464d80 19-32
+  s_5502e4c590b55f::t_6de30c78b1fe01 699-704
+  s_5502e4c590b55f::t_6e2c2566ab39e3 778-810
+  s_5502e4c590b55f::t_6f9408a7ca004b 362,368-369
+  s_5502e4c590b55f::t_f402e70d4087e5 705-708
+  s_5502e4c590b55f::t_52de5c60764f4c 189,191
+  s_5502e4c590b55f::t_a2fc71e95afb06 331-335
+  s_5502e4c590b55f::t_137d5be98d2f9c 721-723
+  s_5502e4c590b55f::t_f5f62bf5cd01dc 211-213
+  s_5502e4c590b55f::t_513abc6ca54015 206-209
+  s_5502e4c590b55f::t_dd9834086df5a0 306
+  s_5502e4c590b55f::t_f82bbfc22ab75c 210
+  s_5502e4c590b55f::t_5bb01b2fd0afa4 251
+  s_5502e4c590b55f::t_e1fea14aa51ba2 370
+Assets/Scripts/PlayerInteraction.cs
+  s_5502e4c590b55f::t_cc8d2ab0829737 83-88
+Assets/Scripts/NPCGestures.cs
+  s_5502e4c590b55f::t_f18b86e3751386 197-207
+  s_5502e4c590b55f::t_0af2c417236f72 33-35
+  s_5502e4c590b55f::t_085f4168db25bf 176
+  s_5502e4c590b55f::t_cd6677f4dda425 22
+  s_5502e4c590b55f::t_93e28a0d780077 160,162-163
+  s_5502e4c590b55f::t_191320a026f32a 215-218
+  s_5502e4c590b55f::t_5db3500c407829 89
+  s_5502e4c590b55f::t_cf09cafc7d4186 227-230,232-243,245-248,251-255
+  s_5502e4c590b55f::t_ede1550174051f 51-52
+  s_5502e4c590b55f::t_7d3514c6f1b334 192-196,211,213
+  s_5502e4c590b55f::t_20740f9dadd1e4 154
+  s_5502e4c590b55f::t_3fecf3cf893ef8 1-21,23-32,36-50,53-70,73-88,90-153,155-159,161,164-172,174-175,177-191,208-210,212,214,219-226,231,244,249-250,256-257
+  s_5502e4c590b55f::t_23bd01db68fb35 71-72
+  s_5502e4c590b55f::t_064b43684dcc8c 173
+Assets/Scripts/Editor/SidekickExport.cs.meta
+  s_5c03083276872f::t_15c5eceeb2f1bd 1-2
+Assets/Scripts/NPCGestures.cs.meta
+  s_f1d174bd3f36da::t_38a71f261d3b04 1-2
+Assets/Scripts/NPCIdleLife.cs.meta
+  s_5502e4c590b55f::t_543697853be644 1-2
+Assets/Scripts/NPCWanderer.cs.meta
+  s_5502e4c590b55f::t_3d1c4470c5ad0f 1-2
+Assets/Scripts/TableConversation.cs.meta
+  s_f1d174bd3f36da::t_349eee6aa8306a 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "dacb712ec68d8bb3416486bebc2c44f4ee3061f3",
+  "prompts": {},
+  "humans": {
+    "h_92edd19a2533f1": {
+      "author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_5502e4c590b55f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cea3b300-d521-4c3d-9d9a-f849f9a0378a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_5c03083276872f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6069a285-7f17-4b6e-a19b-8f1dd6ed39e4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_f1d174bd3f36da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ac64a95ea1b976415",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
