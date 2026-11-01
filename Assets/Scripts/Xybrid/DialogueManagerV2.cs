@@ -56,6 +56,8 @@ public class DialogueManagerV2 : MonoBehaviour
 
     [Header("TTS Audio")]
     [SerializeField] private TTSAudioPlayer _ttsPlayer;
+    [Tooltip("Mouth shapes from phoneme timings start this much before their sound. Kokoro's timings trail the audible speech by ~45 ms.")]
+    [SerializeField, Range(0f, 0.15f)] private float phonemeLipSyncLead = 0.045f;
 
     [Header("Debug")]
     [SerializeField] private NPCDebugPanel npcDebugPanel;
@@ -462,9 +464,10 @@ public class DialogueManagerV2 : MonoBehaviour
             face.Speak(_ttsPlayer.Source, clip, text);
 
             // Exact visemes from the phonemes the model actually spoke; null if it reported none or they don't fit
-            LipSyncCue[] phonemeCues = PhonemeLipSync.FromPhonemes(line.Phonemes, clip.length);
+            LipSyncCue[] phonemeCues = PhonemeLipSync.FromPhonemes(line.Phonemes, clip.length, phonemeLipSyncLead);
             if (phonemeCues != null)
             {
+                Debug.Log($"[DialogueManager] Lip sync for {npc.name} from {line.Phonemes.Length} phonemes ({phonemeCues.Length} cues)");
                 face.SetLipSyncCues(clip, phonemeCues);
                 return;
             }

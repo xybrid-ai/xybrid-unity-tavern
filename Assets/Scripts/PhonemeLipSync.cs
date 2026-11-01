@@ -75,6 +75,9 @@ public static class PhonemeLipSync
             }
             Append(cues, start, span.end, ShapeFor(c));
         }
+        // A stress mark with no vowel after it: the audio trim cut into the final vowel, whose own span was
+        // dropped. The mark's time is that vowel's onset, so keep the mouth open through it.
+        if (stressStart >= 0f) Append(cues, stressStart, lastEnd, 'C');
 
         if (cues.Count == 0 || lastEnd > clipLength + LengthToleranceSeconds) return null;
 
