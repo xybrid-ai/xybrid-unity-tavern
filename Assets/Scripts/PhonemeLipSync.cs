@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 /// <summary>
 /// One phoneme of a synthesized line, as reported by the TTS model: the Misaki symbol and its span in
@@ -17,12 +19,15 @@ public struct PhonemeSpan
 /// into Rhubarb-style mouth cues (A-H, X) for <see cref="NPCFace.SetLipSyncCues"/>. No audio analysis, so
 /// closures land on every M/B/P and the lower lip tucks on F/V. Symbols are Misaki's (US/GB), after its
 /// ɾ->T and ʔ->t swaps; diphthongs are single capitals (A=eɪ, I=aɪ, O=oʊ, W=aʊ, Y=ɔɪ, Q=əʊ).
-/// Thread-safe (no Unity API).
+/// Everything but the AudioClip overload is thread-safe (no Unity API).
 /// </summary>
 public static class PhonemeLipSync
 {
     private const float ShortGapSeconds = 0.08f;    // Word gaps this short keep the previous shape
     private const float LengthToleranceSeconds = 0.1f;
+    private const float OnsetWindowSeconds = 0.01f;
+    private const float OnsetLevel = 0.1f;          // Of the loudest window's RMS
+    private const float MaxOnsetSnapSeconds = 0.5f; // Further than this, trust the timings
 
     private static readonly Dictionary<char, char> Shapes = BuildShapes(
         ("mbp", 'A'),                                   // closed
@@ -37,9 +42,12 @@ public static class PhonemeLipSync
     /// <summary>
     /// Cues for a clip of <paramref name="clipLength"/> seconds, or null when the timings don't fit the clip
     /// (caller falls back to audio analysis). <paramref name="leadSeconds"/> shows each shape slightly
-    /// before its sound, as real mouths do.
+    /// before its sound, as real mouths do. <paramref name="speechOnset"/> (seconds, from
+    /// <see cref="FindSpeechOnset(AudioClip)"/>; negative to skip) pulls the first spoken shape back to where
+    /// the audio actually starts: Kokoro times its first phoneme late when speaking slower than 1.0.
     /// </summary>
-    public static LipSyncCue[] FromPhonemes(PhonemeSpan[] spans, float clipLength, float leadSeconds = 0f)
+    public static LipSyncCue[] FromPhonemes(PhonemeSpan[] spans, float clipLength, float leadSeconds = 0f,
+                                            float speechOnset = -1f)
     {
         if (spans == null || spans.Length == 0 || clipLength <= 0f) return null;
 
@@ -90,7 +98,70 @@ public static class PhonemeLipSync
             if (end > clipLength) end = clipLength;
             if (end > start) result.Add(new LipSyncCue { start = start, end = end, shape = cue.shape });
         }
+        if (speechOnset >= 0f) SnapFirstShapeToOnset(result, speechOnset);
         return result.Count > 0 ? result.ToArray() : null;
+    }
+
+    /// <summary>
+    /// Seconds to the first audible sound: the first 10 ms window louder than a tenth of the loudest one.
+    /// Negative if the clip is silent or unreadable. Main thread only.
+    /// </summary>
+    public static float FindSpeechOnset(AudioClip clip)
+    {
+        if (clip == null || clip.samples <= 0 || clip.channels <= 0) return -1f;
+        var data = new float[clip.samples * clip.channels];
+        if (!clip.GetData(data, 0)) return -1f;
+        if (clip.channels == 1) return FindSpeechOnset(data, clip.frequency);
+
+        var mono = new float[clip.samples];
+        for (int i = 0; i < mono.Length; i++) mono[i] = data[i * clip.channels];
+        return FindSpeechOnset(mono, clip.frequency);
+    }
+
+    /// <summary>Like <see cref="FindSpeechOnset(AudioClip)"/>, on mono samples. Thread-safe.</summary>
+    public static float FindSpeechOnset(float[] mono, int sampleRate)
+    {
+        if (mono == null || sampleRate <= 0) return -1f;
+        int hop = Math.Max(1, (int)(OnsetWindowSeconds * sampleRate));
+        int windows = mono.Length / hop;
+        if (windows == 0) return -1f;
+
+        var rms = new float[windows];
+        float loudest = 0f;
+        for (int w = 0; w < windows; w++)
+        {
+            double sum = 0;
+            for (int i = w * hop, end = i + hop; i < end; i++) sum += mono[i] * mono[i];
+            rms[w] = (float)Math.Sqrt(sum / hop);
+            if (rms[w] > loudest) loudest = rms[w];
+        }
+        if (loudest <= 0f) return -1f;
+
+        for (int w = 0; w < windows; w++)
+            if (rms[w] >= loudest * OnsetLevel) return w * hop / (float)sampleRate;
+        return -1f;
+    }
+
+    private static void SnapFirstShapeToOnset(List<LipSyncCue> cues, float onset)
+    {
+        int first = cues.FindIndex(c => c.shape != 'X');
+        if (first < 0) return;
+        LipSyncCue speaking = cues[first];
+        if (speaking.start <= onset || speaking.start - onset > MaxOnsetSnapSeconds) return;
+
+        speaking.start = onset;
+        cues[first] = speaking;
+        // Rest cues before it now overlap: shorten or drop them
+        for (int i = first - 1; i >= 0; i--)
+        {
+            LipSyncCue rest = cues[i];
+            if (rest.start >= onset) cues.RemoveAt(i);
+            else if (rest.end > onset)
+            {
+                rest.end = onset;
+                cues[i] = rest;
+            }
+        }
     }
 
     /// <summary>Mouth shape for one Misaki symbol: X for spaces and punctuation, B for anything unknown.</summary>

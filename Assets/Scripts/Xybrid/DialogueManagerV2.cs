@@ -464,7 +464,8 @@ public class DialogueManagerV2 : MonoBehaviour
             face.Speak(_ttsPlayer.Source, clip, text);
 
             // Exact visemes from the phonemes the model actually spoke; null if it reported none or they don't fit
-            LipSyncCue[] phonemeCues = PhonemeLipSync.FromPhonemes(line.Phonemes, clip.length, phonemeLipSyncLead);
+            LipSyncCue[] phonemeCues = line.Phonemes == null ? null : PhonemeLipSync.FromPhonemes(
+                line.Phonemes, clip.length, phonemeLipSyncLead, PhonemeLipSync.FindSpeechOnset(clip));
             if (phonemeCues != null)
             {
                 Debug.Log($"[DialogueManager] Lip sync for {npc.name} from {line.Phonemes.Length} phonemes ({phonemeCues.Length} cues)");
