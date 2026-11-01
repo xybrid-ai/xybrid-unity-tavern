@@ -269,8 +269,10 @@ public class DialogueManagerV2 : MonoBehaviour
         if (conversationHistoryUI != null)
             conversationHistoryUI.AddMessage(npc.npcName, response.Text, isPlayer: false);
 
+        ShowLineEmotion(npc, response.Text);
+
         // Fire-and-forget TTS (non-blocking, non-fatal)
-        _ = PlayTTSAsync(response.Text, npc.voiceId, npc.voiceSpeed);
+        _ = PlayTTSAsync(npc, response.Text, npc.voiceId, npc.voiceSpeed);
 
         await ShowPlayerInput();
     }
@@ -392,8 +394,10 @@ public class DialogueManagerV2 : MonoBehaviour
         if (conversationHistoryUI != null)
             conversationHistoryUI.AddMessage(_currentNPC.npcName, response.Text, isPlayer: false);
 
+        ShowLineEmotion(_currentNPC, response.Text);
+
         // Fire-and-forget TTS (non-blocking, non-fatal)
-        _ = PlayTTSAsync(response.Text, _currentNPC.voiceId, _currentNPC.voiceSpeed);
+        _ = PlayTTSAsync(_currentNPC, response.Text, _currentNPC.voiceId, _currentNPC.voiceSpeed);
 
         UnlockAndClearInput();
         await ShowPlayerInput();
@@ -428,23 +432,66 @@ public class DialogueManagerV2 : MonoBehaviour
     // TTS playback
     // ================================================================
 
-    private async Task PlayTTSAsync(string text, string voiceId, float speed = 1.0f)
+    /// <summary>
+    /// Synthesizes and plays <paramref name="text"/> in <paramref name="npc"/>'s voice, positioned at their head.
+    /// Their NPCFace (if any) lip-syncs from loudness right away, then from Rhubarb visemes once analysed.
+    /// </summary>
+    private async Task PlayTTSAsync(NPCIdentity npc, string text, string voiceId, float speed = 1.0f)
     {
         if (_ttsPlayer == null) return;
 
         var service = XybridModelService.Instance;
         if (service == null || !service.HasTTSModel) return;
 
+        int session = _dialogueSession;
         try
         {
             byte[] pcm = await service.RunTTSAsync(text, voiceId, speed);
-            if (pcm != null && pcm.Length > 0)
-                _ttsPlayer.PlayPCM(pcm);
+            // Dialogue closed (and maybe another opened) while synthesizing: stay silent
+            if (session != _dialogueSession || _ttsPlayer == null) return;
+            if (pcm == null || pcm.Length == 0) return;
+
+            _ttsPlayer.SetSpeaker(npc != null ? npc.transform : null);
+            AudioClip clip = _ttsPlayer.PlayPCM(pcm);
+            if (clip == null || npc == null) return;
+
+            // Explicit null checks rather than ?. : a destroyed face must not be called
+            NPCFace face = npc.GetComponentInChildren<NPCFace>();
+            if (face == null) return;
+            face.Speak(_ttsPlayer.Source, clip, text);
+
+            // Instant in-engine visemes from the clip's spectrum (works everywhere); Rhubarb, when it
+            // can run (it's x86_64-only on macOS), refines them a moment later
+            LipSyncCue[] spectralCues = SpectralLipSync.Analyze(clip);
+            if (spectralCues != null)
+                face.SetLipSyncCues(clip, spectralCues);
+
+            if (!RhubarbLipSync.IsAvailable) return;
+            LipSyncCue[] cues = await RhubarbLipSync.AnalyzeAsync(clip, text);
+            // Stale session, failed analysis, or the clip was replaced/destroyed by a newer line
+            if (session != _dialogueSession || cues == null || face == null || clip == null) return;
+            face.SetLipSyncCues(clip, cues);
         }
         catch (System.Exception ex)
         {
             Debug.LogWarning($"[DialogueManager] TTS failed (non-fatal): {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Shows the emotion a line reads with on the NPC's face, held for roughly as long as the line lasts.
+    /// Runs whether or not TTS is available.
+    /// </summary>
+    private static void ShowLineEmotion(NPCIdentity npc, string text)
+    {
+        if (npc == null || string.IsNullOrEmpty(text)) return;
+        if (!LineEmotion.TryAnalyze(text, out FaceEmotion emotion, out float intensity)) return;
+
+        NPCFace face = npc.GetComponentInChildren<NPCFace>();
+        if (face == null) return;
+
+        float holdSeconds = Mathf.Min(2.5f + 0.04f * text.Length, 8f);
+        face.ShowEmotion(emotion, intensity, holdSeconds);
     }
 
     // ================================================================
@@ -694,7 +741,10 @@ public class DialogueManagerV2 : MonoBehaviour
             StopCoroutine(_typewriterCoroutine);
 
         if (_ttsPlayer != null)
+        {
             _ttsPlayer.Stop();
+            _ttsPlayer.SetSpeaker(null);
+        }
 
         var npcAnimator = _currentNPC != null ? _currentNPC.GetComponentInChildren<Animator>() : null;
         if (npcAnimator != null)
@@ -702,6 +752,12 @@ public class DialogueManagerV2 : MonoBehaviour
             npcAnimator.SetBool("isTalking", false);
             npcAnimator.SetBool("isThinking", false);
         }
+
+        // Close the mouth now instead of waiting for the face to notice the clip is gone
+        var npcFace = _currentNPC != null ? _currentNPC.GetComponentInChildren<NPCFace>() : null;
+        if (npcFace != null)
+            npcFace.StopSpeaking();
+
         // TryGetComponent (not GetComponent?.) so a missing NPCLookAt can't abort EndDialogue
         // before ActiveNPC is cleared and DialogueEnded is raised
         if (_currentNPC != null && _currentNPC.TryGetComponent(out NPCLookAt npcLookAt))

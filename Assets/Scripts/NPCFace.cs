@@ -1,0 +1,1371 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// One Rhubarb Lip Sync mouth cue: <see cref="shape"/> (A..H, or X for rest) held from
+/// <see cref="start"/> to <see cref="end"/> seconds into the clip.
+/// </summary>
+[System.Serializable]
+public struct LipSyncCue
+{
+    public float start;
+    public float end;
+    public char shape;
+}
+
+/// <summary>
+/// Drives an NPC's face blend shapes in four layers, all written once per frame in LateUpdate as
+/// offsets on top of the character's sculpted rest weights:
+/// (1) expression: the base mood, replaced by a transient emotion (<see cref="ShowEmotion"/>) or the
+/// Thinking face while the Animator's isThinking is on; (2) natural blinks; (3) mouth: TTS audio given to
+/// <see cref="Speak"/> (Rhubarb cues once they arrive, the clip's loudness until then), procedural babble
+/// while isTalking is on without audio (table chatter), otherwise rest; (4) an optional jaw bone rotation.
+/// Body-shape blend shapes (defaultHeavy, defaultBuff, defaultSkinny, masculineFeminine) are never written.
+/// Attach to the NPC root, next to the Animator.
+/// </summary>
+[DefaultExecutionOrder(200)]
+[DisallowMultipleComponent]
+public class NPCFace : MonoBehaviour
+{
+    private const string ShapePrefix = "MESHBlends.";
+    private const string IsTalkingParam = "isTalking";
+    private const string IsThinkingParam = "isThinking";
+    private static readonly int IsTalkingHash = Animator.StringToHash(IsTalkingParam);
+    private static readonly int IsThinkingHash = Animator.StringToHash(IsThinkingParam);
+
+    // Character-shape blend shapes on the same mesh; writing them would reshape the body
+    private static readonly string[] BodyShapes = { "defaultHeavy", "defaultBuff", "defaultSkinny", "masculineFeminine" };
+
+    // Mouth shapes driven by the lip-sync layer (columns of CuePoses)
+    private const int MJaw = 0, MClose = 1, MPressL = 2, MPressR = 3, MStretchL = 4, MStretchR = 5, MFunnel = 6,
+                      MPucker = 7, MRollLower = 8, MUpperUpL = 9, MUpperUpR = 10, MTongueUp = 11, MTongueOut = 12,
+                      MouthCount = 13;
+    private static readonly string[] MouthShapeNames =
+    {
+        "jawOpen", "mouthClose", "mouthPressLeft", "mouthPressRight", "mouthStretchLeft", "mouthStretchRight",
+        "mouthFunnel", "mouthPucker", "mouthRollLower", "mouthUpperUpLeft", "mouthUpperUpRight", "tongueUp", "tongueOut"
+    };
+
+    // Rhubarb cue rows: A..H, then X (rest)
+    private const int CueA = 0, CueB = 1, CueC = 2, CueD = 3, CueE = 4, CueF = 5, CueX = 8, CueCount = 9;
+
+    // Mouth pose per Rhubarb cue, 0..1 (ported from XybridAvatarPlayer.Pose; rounded E/F softened for the
+    // human Sidekick faces, where the troll's 0.8 pucker read as a kiss)
+    private static readonly float[,] CuePoses =
+    {
+        //  jaw   close pressL pressR strL  strR  funnel pucker rollLo upL   upR   tUp   tOut
+        { 0f,    .8f,  .35f,  .35f,  0f,   0f,   0f,    0f,    0f,    0f,   0f,   0f,   0f   }, // A  closed (M, B, P)
+        { .13f,  0f,   0f,    0f,    .18f, .18f, 0f,    0f,    0f,    0f,   0f,   0f,   0f   }, // B  slightly open (K, S, T)
+        { .36f,  0f,   0f,    0f,    .22f, .22f, 0f,    0f,    0f,    0f,   0f,   0f,   0f   }, // C  open (EH, AE)
+        { .66f,  0f,   0f,    0f,    0f,   0f,   0f,    0f,    0f,    0f,   0f,   0f,   0f   }, // D  wide open (AA)
+        { .31f,  0f,   0f,    0f,    0f,   0f,   .45f,  .12f,  0f,    0f,   0f,   0f,   0f   }, // E  rounded (AO, ER)
+        { .17f,  0f,   0f,    0f,    0f,   0f,   .2f,   .5f,   0f,    0f,   0f,   0f,   0f   }, // F  puckered (UW, OW, W)
+        { .06f,  0f,   0f,    0f,    0f,   0f,   0f,    0f,    .5f,   .22f, .22f, 0f,   0f   }, // G  teeth on lip (F, V)
+        { .22f,  0f,   0f,    0f,    0f,   0f,   0f,    0f,    0f,    0f,   0f,   .42f, .15f }, // H  tongue up (L)
+        { 0f,    0f,   0f,    0f,    0f,   0f,   0f,    0f,    0f,    0f,   0f,   0f,   0f   }, // X  rest
+    };
+
+    private const float RestingMouthOpenScale = 0.15f;   // Base mood: keep only a hint of lip-parting shapes
+    private const float CueBlendSeconds = 0.04f;         // Between consecutive Rhubarb cues
+    private const float CueArrivalBlendSeconds = 0.15f;  // Loudness jaw -> cue poses once cues arrive
+    private const float EnvelopeHop = 0.01f;             // Loudness envelope resolution (seconds)
+    private const float SpeechStartGrace = 0.5f;         // Speak() before the source starts playing
+    private const float AudioMouthSmoothing = 0.02f;     // Time constants (seconds) of the mouth follow
+    private const float BabbleMouthSmoothing = 0.045f;
+    private const float RestMouthSmoothing = 0.06f;
+    private const float MouthActiveFadeSeconds = 0.2f;   // Lip-safety scaling of expression mouth shapes
+    private const float BindRetrySeconds = 1f;
+    private const int MaxBindAttempts = 5;
+
+    [Header("References")]
+    [Tooltip("Auto-found on this GameObject (or its children) when empty. Supplies isTalking / isThinking and the jaw bone.")]
+    [SerializeField] private Animator animator;
+    [Tooltip("Face mesh. Auto-found when empty: the child SkinnedMeshRenderer with the most 'MESHBlends.' blend shapes.")]
+    [SerializeField] private SkinnedMeshRenderer faceMesh;
+    [Tooltip("Expression weights baked from the Synty face poses (Tavern > Bake Face Expression Library). " +
+             "A small built-in table is used when empty.")]
+    [SerializeField] private FaceExpressionLibrary library;
+
+    [Header("Mood")]
+    [Tooltip("Resting expression that fits this character.")]
+    [SerializeField] private FaceEmotion baseMood = FaceEmotion.Neutral;
+    [SerializeField, Range(0f, 1f)] private float baseMoodStrength = 0.45f;
+    [Tooltip("Strength of the Thinking face while the Animator's isThinking is on.")]
+    [SerializeField, Range(0f, 1f)] private float thinkingStrength = 1f;
+    [Tooltip("Seconds to blend into a transient emotion or the Thinking face.")]
+    [SerializeField] private float emotionFadeIn = 0.3f;
+    [Tooltip("Seconds to release back to the base mood.")]
+    [SerializeField] private float emotionFadeOut = 0.8f;
+
+    [Header("Blinks")]
+    [Tooltip("Seconds between blinks, picked randomly in this range (x = min, y = max).")]
+    [SerializeField] private Vector2 blinkInterval = new Vector2(2.2f, 5.5f);
+    [Tooltip("Seconds for one close-and-open, picked randomly in this range.")]
+    [SerializeField] private Vector2 blinkDuration = new Vector2(0.12f, 0.16f);
+    [SerializeField, Range(0f, 1f)] private float doubleBlinkChance = 0.15f;
+
+    [Header("Mouth")]
+    [Tooltip("jawOpen at full loudness while TTS audio plays without Rhubarb cues (yet).")]
+    [SerializeField] private float loudnessJaw = 0.55f;
+    [Tooltip("Mouth movement while the Animator's isTalking is on but no audio plays for this face (table chatter).")]
+    [SerializeField, Range(0f, 1f)] private float babbleAmount = 0.7f;
+    [Tooltip("Babble syllables per second, picked randomly per syllable in this range.")]
+    [SerializeField] private Vector2 babbleRate = new Vector2(4f, 6f);
+    [Tooltip("Babble stops after isTalking has been on this long (covers TableConversation's longest turn). 0 = no limit.")]
+    [SerializeField] private float maxBabbleSeconds = 8f;
+    [Tooltip("Babble limit while this NPC is in dialogue with the player: DialogueManagerV2 leaves isTalking on " +
+             "after the line is shown, and TTS audio (when available) takes over the mouth anyway. 0 = no limit.")]
+    [SerializeField] private float dialogueBabbleSeconds = 4f;
+    [Tooltip("Expression mouth/jaw/cheekPuff shapes are scaled by this while the mouth moves, so lip shapes stay readable.")]
+    [SerializeField, Range(0f, 1f)] private float speakingExpressionMouth = 0.4f;
+
+    [Header("Jaw Bone (optional)")]
+    [Tooltip("Degrees the humanoid Jaw bone opens at full jawOpen, about its local X axis, on top of the animation. 0 = off.")]
+    [SerializeField] private float jawBoneDegrees = 0f;
+
+    [Header("Debug")]
+    [SerializeField] private bool logEvents = false;
+
+    // ---- Binding ----
+    private SkinnedMeshRenderer _face;
+    private Mesh _boundMesh;
+    private bool _bound;
+    private int _bindAttempts;
+    private float _nextBindAttempt;
+    private int _channelCount;
+    private int[] _shapeIndex;      // Blend shape index on the mesh, per channel
+    private float[] _rest;          // Rest weight (0..100) captured at bind
+    private float[] _written;       // Last weight written, to skip unchanged writes
+    private bool[] _isMouthChannel; // mouth*, jaw*, cheekPuff*: scaled while the mouth layer is active
+    private bool[] _opensMouth;     // Shapes that part the lips: damped in the resting mood (a held grin reads as mid-sentence)
+    private bool[] _isEyeWide;      // eyeWide*: suppressed while blinking
+    private float[] _add;           // Blink + mouth offsets of the current frame
+    private readonly Dictionary<string, int> _channelByName = new Dictionary<string, int>(System.StringComparer.Ordinal);
+    private readonly int[] _mouthChannel = new int[MouthCount];
+    private int _blinkUpperL = -1, _blinkUpperR = -1, _blinkLowerL = -1, _blinkLowerR = -1;
+    private Transform _jawBone;
+    private NPCIdentity _identity;
+
+    // ---- Animator flags ----
+    private RuntimeAnimatorController _checkedController;
+    private bool _hasTalkingParam;
+    private bool _hasThinkingParam;
+
+    // ---- Expression layer ----
+    private enum ExprKind { Base, Transient, Thinking }
+    private static readonly int EmotionCount = System.Enum.GetValues(typeof(FaceEmotion)).Length;
+    private int[][] _emotionChannels;   // Sparse weights per emotion, resolved to channels at bind
+    private float[][] _emotionWeights;
+    private FaceExpressionLibrary _builtLibrary;
+    private float[] _exprFrom, _exprTarget, _exprState;
+    private bool _exprStarted;
+    private ExprKind _exprKind;
+    private FaceEmotion _exprEmotion;
+    private int _exprSerial;
+    private float _fadeStart;
+    private float _fadeDuration;
+    private bool _transientActive;
+    private FaceEmotion _transientEmotion;
+    private float _transientIntensity;
+    private float _transientEnd;
+    private int _transientSerial;
+
+    // ---- Blink layer ----
+    private bool _blinking;
+    private float _blinkStart;
+    private float _blinkLength;
+    private float _nextBlinkTime;
+    private bool _doubleAfterThis;
+    private bool _secondBlinkQueued;
+
+    // ---- Mouth layer ----
+    private readonly float[] _mouthTarget = new float[MouthCount];
+    private readonly float[] _mouthState = new float[MouthCount];
+    private float _mouthActive;     // 0..1, eased
+
+    // Audio speech
+    private bool _hasSpeech;
+    private AudioSource _speechSource;
+    private AudioClip _speechClip;
+    private float _speechGivenAt;
+    private bool _speechSeenPlaying;
+    private LipSyncCue[] _cues;
+    private float _cuesArrivedAt = -1f;
+    private float[] _envelope;
+    private float[] _envelopeSort;
+    private int _envelopeLength;
+    private float[] _pcmChunk;
+    private readonly float[] _outputBuffer = new float[256];
+    private float _livePeak = 0.05f;
+
+    // Babble
+    private bool _wasTalking;
+    private float _talkStart;
+    private bool _stretchHadAudio;
+    private bool _firstSyllable;
+    private int _syllablesLeftInWord;
+    private float _syllableStart;
+    private float _syllableLength;
+    private bool _syllableIsGap;
+    private int _syllableShape = CueX;
+    private float _syllableAmp;
+
+    // ---- Jaw bone ----
+    private bool _jawWritten;
+    private Quaternion _jawBase;
+    private Quaternion _jawLastWritten;
+
+    // ---- Per-instance randomness (keeps NPCs out of sync without touching UnityEngine.Random's sequence) ----
+    private uint _rngState = 0x9E3779B9u;
+    private float _noiseSeed;
+
+    // ================================================================
+    // Public API
+    // ================================================================
+
+    /// <summary>Resting expression, shown at baseMoodStrength. Changing it crossfades to the new mood.</summary>
+    public FaceEmotion BaseMood
+    {
+        get => baseMood;
+        set => baseMood = value;
+    }
+
+    /// <summary>True while the clip given to <see cref="Speak"/> is playing on its AudioSource.</summary>
+    public bool IsSpeakingAudio =>
+        _hasSpeech && _speechSource != null && _speechClip != null &&
+        _speechSource.clip == _speechClip && _speechSource.isPlaying;
+
+    /// <summary>
+    /// Drives the mouth from <paramref name="clip"/> while it plays on <paramref name="source"/> (time follows
+    /// the source). The loudness envelope is computed here, on the main thread, so the jaw moves immediately;
+    /// pass Rhubarb cues later with <see cref="SetLipSyncCues"/>.
+    /// </summary>
+    public void Speak(AudioSource source, AudioClip clip, string text)
+    {
+        ClearSpeech();
+        if (source == null || clip == null) return;
+
+        _hasSpeech = true;
+        _speechSource = source;
+        _speechClip = clip;
+        _speechGivenAt = Time.unscaledTime;
+        _speechSeenPlaying = source.clip == clip && source.isPlaying;
+        _stretchHadAudio = true;  // Audio owns this line's mouth; no babble once it ends
+        _livePeak = 0.05f;
+
+        ComputeEnvelope(clip);
+
+        if (logEvents)
+        {
+            Debug.Log($"[NPCFace] {name} speaks {clip.length:F1}s " +
+                      $"(envelope: {(_envelopeLength > 0 ? _envelopeLength + " hops" : "live")}): \"{text}\"");
+        }
+    }
+
+    /// <summary>
+    /// Switches the mouth of the current line to Rhubarb cue poses (crossfading from the loudness jaw).
+    /// Ignored when <paramref name="clip"/> is not the clip currently given to <see cref="Speak"/>.
+    /// </summary>
+    public void SetLipSyncCues(AudioClip clip, LipSyncCue[] cues)
+    {
+        if (!_hasSpeech || clip == null || clip != _speechClip) return;
+        if (cues == null || cues.Length == 0) return;
+
+        LipSyncCue[] clean = SanitizeCues(cues);
+        if (clean == null) return;
+
+        _cues = clean;
+        _cuesArrivedAt = Time.unscaledTime;
+
+        if (logEvents)
+            Debug.Log($"[NPCFace] {name} received {clean.Length} lip-sync cues");
+    }
+
+    /// <summary>Stops driving the mouth from audio; it eases back to rest. Does not stop the AudioSource.</summary>
+    public void StopSpeaking()
+    {
+        ClearSpeech();
+    }
+
+    /// <summary>
+    /// Shows a transient emotion: crossfades in over emotionFadeIn, holds for <paramref name="holdSeconds"/>,
+    /// then releases back to the base mood over emotionFadeOut. Intensity 0 releases immediately.
+    /// </summary>
+    public void ShowEmotion(FaceEmotion emotion, float intensity, float holdSeconds)
+    {
+        if (float.IsNaN(intensity) || intensity <= 0.001f)
+        {
+            _transientActive = false;
+            return;
+        }
+        if (float.IsNaN(holdSeconds) || holdSeconds < 0f) holdSeconds = 0f;
+
+        _transientEmotion = emotion;
+        _transientIntensity = Mathf.Clamp01(intensity);
+        _transientEnd = Time.time + Mathf.Max(0f, emotionFadeIn) + holdSeconds;
+        _transientActive = true;
+        _transientSerial++;
+
+        if (logEvents)
+            Debug.Log($"[NPCFace] {name} shows {emotion} at {_transientIntensity:F2} for {holdSeconds:F1}s");
+    }
+
+    // ================================================================
+    // Unity lifecycle
+    // ================================================================
+
+    private void Awake()
+    {
+        if (animator == null && !TryGetComponent(out animator))
+            animator = GetComponentInChildren<Animator>();
+
+        if (!TryGetComponent(out _identity))
+            _identity = GetComponentInParent<NPCIdentity>();
+
+        SeedRandom();
+        for (int m = 0; m < MouthCount; m++) _mouthChannel[m] = -1;
+    }
+
+    private void OnEnable()
+    {
+        // Stagger the first blink so a room of NPCs doesn't blink together
+        _blinking = false;
+        _secondBlinkQueued = false;
+        _nextBlinkTime = Time.time + RandomRange(0.3f, Mathf.Max(0.4f, blinkInterval.y));
+    }
+
+    private void Start()
+    {
+        _nextBindAttempt = 0f;
+        EnsureBound();
+    }
+
+    private void OnDisable()
+    {
+        // Leave the face at its sculpted rest pose instead of frozen mid-blink or mid-word
+        RestoreRestWeights();
+        RestoreJawBone();
+    }
+
+    private void OnValidate()
+    {
+        blinkInterval.x = Mathf.Max(0.3f, blinkInterval.x);
+        blinkInterval.y = Mathf.Max(blinkInterval.x, blinkInterval.y);
+        blinkDuration.x = Mathf.Clamp(blinkDuration.x, 0.05f, 0.5f);
+        blinkDuration.y = Mathf.Clamp(blinkDuration.y, blinkDuration.x, 0.5f);
+        babbleRate.x = Mathf.Max(0.5f, babbleRate.x);
+        babbleRate.y = Mathf.Max(babbleRate.x, babbleRate.y);
+        emotionFadeIn = Mathf.Max(0f, emotionFadeIn);
+        emotionFadeOut = Mathf.Max(0f, emotionFadeOut);
+        loudnessJaw = Mathf.Max(0f, loudnessJaw);
+        maxBabbleSeconds = Mathf.Max(0f, maxBabbleSeconds);
+        dialogueBabbleSeconds = Mathf.Max(0f, dialogueBabbleSeconds);
+        jawBoneDegrees = Mathf.Max(0f, jawBoneDegrees);
+    }
+
+    private void LateUpdate()
+    {
+        if (!EnsureBound()) return;
+
+        // Library assigned or swapped at runtime: re-resolve the expressions
+        if (!ReferenceEquals(_builtLibrary, library))
+            BuildExpressions();
+
+        float now = Time.time;
+        ReadAnimatorFlags(out bool talking, out bool thinking);
+        UpdateSpeechState();
+
+        UpdateExpression(now, thinking);
+        float blink = UpdateBlink(now);
+        float jaw = UpdateMouth(now, talking);
+
+        Compose(blink);
+        ApplyJawBone(jaw);
+    }
+
+    // ================================================================
+    // Binding
+    // ================================================================
+
+    /// <summary>Binds the face mesh once (retrying for a few seconds if it isn't there yet); rebinds if its mesh changes.</summary>
+    private bool EnsureBound()
+    {
+        if (_bound)
+        {
+            if (_face != null && _face.sharedMesh == _boundMesh) return true;
+            _bound = false;  // Renderer destroyed or mesh swapped: bind again
+            _bindAttempts = 0;
+        }
+
+        if (Time.unscaledTime < _nextBindAttempt) return false;
+        _nextBindAttempt = Time.unscaledTime + BindRetrySeconds;
+
+        if (Bind()) return true;
+
+        if (++_bindAttempts >= MaxBindAttempts)
+        {
+            Debug.LogWarning($"[NPCFace] {name}: no face SkinnedMeshRenderer with '{ShapePrefix}' blend shapes found; " +
+                             "face animation disabled.");
+            enabled = false;
+        }
+        return false;
+    }
+
+    private bool Bind()
+    {
+        SkinnedMeshRenderer smr = faceMesh != null ? faceMesh : FindFaceMesh();
+        if (smr == null || smr.sharedMesh == null) return false;
+
+        Mesh mesh = smr.sharedMesh;
+        int shapeCount = mesh.blendShapeCount;
+
+        // Channels: every face shape except body shapes, keyed by ARKit name (prefix stripped)
+        _channelByName.Clear();
+        var indices = new List<int>(shapeCount);
+        var names = new List<string>(shapeCount);
+        for (int i = 0; i < shapeCount; i++)
+        {
+            string key = StripPrefix(mesh.GetBlendShapeName(i));
+            if (key.Length == 0 || IsBodyShape(key) || _channelByName.ContainsKey(key)) continue;
+
+            _channelByName.Add(key, indices.Count);
+            indices.Add(i);
+            names.Add(key);
+        }
+
+        if (indices.Count == 0) return false;
+
+        int n = indices.Count;
+        _channelCount = n;
+        _shapeIndex = indices.ToArray();
+        _rest = new float[n];
+        _written = new float[n];
+        _isMouthChannel = new bool[n];
+        _isEyeWide = new bool[n];
+        _opensMouth = new bool[n];
+        _add = new float[n];
+        _exprFrom = new float[n];
+        _exprTarget = new float[n];
+        _exprState = new float[n];
+
+        for (int c = 0; c < n; c++)
+        {
+            // The Animator never touches face shapes here, so the current weight is the sculpted rest
+            _rest[c] = smr.GetBlendShapeWeight(_shapeIndex[c]);
+            _written[c] = _rest[c];
+
+            string key = names[c];
+            _isMouthChannel[c] = key.StartsWith("mouth", System.StringComparison.Ordinal) ||
+                                 key.StartsWith("jaw", System.StringComparison.Ordinal) ||
+                                 key.StartsWith("cheekPuff", System.StringComparison.Ordinal);
+            _isEyeWide[c] = key.StartsWith("eyeWide", System.StringComparison.Ordinal);
+            _opensMouth[c] = key.StartsWith("jawOpen", System.StringComparison.Ordinal) ||
+                             key.StartsWith("mouthLowerDown", System.StringComparison.Ordinal) ||
+                             key.StartsWith("mouthUpperUp", System.StringComparison.Ordinal) ||
+                             key.StartsWith("mouthFunnel", System.StringComparison.Ordinal) ||
+                             key.StartsWith("mouthStretch", System.StringComparison.Ordinal);
+        }
+
+        for (int m = 0; m < MouthCount; m++)
+            _mouthChannel[m] = Channel(MouthShapeNames[m]);
+
+        _blinkUpperL = FirstChannel("eyeBlinkUpperLeft", "eyeBlinkLeft");
+        _blinkUpperR = FirstChannel("eyeBlinkUpperRight", "eyeBlinkRight");
+        _blinkLowerL = Channel("eyeBlinkLowerLeft");
+        _blinkLowerR = Channel("eyeBlinkLowerRight");
+
+        _jawBone = animator != null && animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Jaw) : null;
+        _jawWritten = false;
+        if (_jawBone == null && jawBoneDegrees > 0f)
+            Debug.LogWarning($"[NPCFace] {name}: jawBoneDegrees is set but the avatar has no Jaw bone.");
+
+        _face = smr;
+        _boundMesh = mesh;
+        _bound = true;
+        _bindAttempts = 0;
+        _exprStarted = false;  // Snap to the base mood on the first frame instead of fading in from nothing
+
+        BuildExpressions();
+
+        if (logEvents)
+        {
+            Debug.Log($"[NPCFace] {name}: bound {n}/{shapeCount} shapes on '{smr.name}', " +
+                      $"jaw bone {(_jawBone != null ? "found" : "missing")}, " +
+                      $"library {(library != null ? library.name : "built-in")}");
+        }
+        return true;
+    }
+
+    /// <summary>The child SkinnedMeshRenderer with the most "MESHBlends." shapes (ties prefer one named "mesh").</summary>
+    private SkinnedMeshRenderer FindFaceMesh()
+    {
+        SkinnedMeshRenderer best = null;
+        int bestCount = 0;
+        SkinnedMeshRenderer jawFallback = null;
+
+        foreach (SkinnedMeshRenderer r in GetComponentsInChildren<SkinnedMeshRenderer>(true))
+        {
+            Mesh mesh = r.sharedMesh;
+            if (mesh == null) continue;
+
+            int count = 0;
+            for (int i = 0; i < mesh.blendShapeCount; i++)
+            {
+                string shape = mesh.GetBlendShapeName(i);
+                if (shape.StartsWith(ShapePrefix, System.StringComparison.Ordinal)) count++;
+                else if (jawFallback == null && shape.EndsWith("jawOpen", System.StringComparison.Ordinal)) jawFallback = r;
+            }
+
+            if (count > bestCount || (count > 0 && count == bestCount && r.name == "mesh" && best.name != "mesh"))
+            {
+                best = r;
+                bestCount = count;
+            }
+        }
+
+        return best != null ? best : jawFallback;
+    }
+
+    private int Channel(string key)
+    {
+        return key != null && _channelByName.TryGetValue(key, out int c) ? c : -1;
+    }
+
+    private int FirstChannel(string key, string alternative)
+    {
+        int c = Channel(key);
+        return c >= 0 ? c : Channel(alternative);
+    }
+
+    private static string StripPrefix(string shapeName)
+    {
+        if (string.IsNullOrEmpty(shapeName)) return string.Empty;
+        int dot = shapeName.LastIndexOf('.');
+        return dot >= 0 ? shapeName.Substring(dot + 1) : shapeName;
+    }
+
+    private static bool IsBodyShape(string key)
+    {
+        for (int i = 0; i < BodyShapes.Length; i++)
+        {
+            if (string.Equals(key, BodyShapes[i], System.StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private void RestoreRestWeights()
+    {
+        if (!_bound || _face == null || _written == null) return;
+
+        for (int c = 0; c < _channelCount; c++)
+        {
+            if (_written[c] == _rest[c]) continue;
+            _face.SetBlendShapeWeight(_shapeIndex[c], _rest[c]);
+            _written[c] = _rest[c];
+        }
+    }
+
+    // ================================================================
+    // Expression tables
+    // ================================================================
+
+    /// <summary>A built-in shape weight. Bilateral names without Left/Right (e.g. "mouthSmile") apply to both sides.</summary>
+    private readonly struct BuiltInShape
+    {
+        public readonly string Shape;
+        public readonly float Weight;
+
+        public BuiltInShape(string shape, float weight)
+        {
+            Shape = shape;
+            Weight = weight;
+        }
+    }
+
+    private static BuiltInShape S(string shape, float weight) => new BuiltInShape(shape, weight);
+
+    // Small fallback used when no library is assigned (rough approximations of the Synty poses)
+    private static readonly BuiltInShape[] NoShapes = new BuiltInShape[0];
+    private static readonly BuiltInShape[] ContentFace =
+        { S("mouthSmile", .3f), S("cheekSquint", .15f), S("eyeSquint", .15f), S("browInnerUp", .1f) };
+    private static readonly BuiltInShape[] HappyFace =
+        { S("mouthSmile", .65f), S("cheekSquint", .4f), S("eyeSquint", .45f), S("browInnerUp", .3f), S("mouthUpperUp", .08f) };
+    private static readonly BuiltInShape[] GrumpyFace =
+        { S("browInnerDown", .6f), S("browFrown", .3f), S("noseSneer", .35f), S("eyeSquint", .5f),
+          S("mouthFrown", .4f), S("mouthPress", .25f), S("mouthShrugLower", .2f) };
+    private static readonly BuiltInShape[] WorriedFace =
+        { S("browInnerUp", .65f), S("browOuterDown", .25f), S("mouthFrown", .25f), S("mouthStretch", .15f), S("eyeWideUpper", .15f) };
+    private static readonly BuiltInShape[] SuspiciousFace =
+        { S("eyeSquint", .5f), S("browInnerDownLeft", .4f), S("browOuterUpRight", .3f), S("mouthPress", .2f), S("mouthLeft", .15f) };
+    private static readonly BuiltInShape[] SurprisedFace =
+        { S("browInnerUp", .8f), S("browRaise", .25f), S("eyeWideUpper", .55f), S("eyeWideLower", .4f),
+          S("jawOpen", .2f), S("mouthFunnel", .15f) };
+    // No Synty clip for Thinking: brows knit up, eyes narrowed and up, lips pressed off to one side
+    private static readonly BuiltInShape[] ThinkingFace =
+        { S("browInnerUp", .35f), S("browOuterDown", .12f), S("eyeSquint", .2f), S("mouthPress", .25f),
+          S("eyeLookUp", .15f), S("mouthLeft", .1f) };
+
+    private static BuiltInShape[] BuiltInTable(FaceEmotion emotion)
+    {
+        return emotion switch
+        {
+            FaceEmotion.Neutral => NoShapes,
+            FaceEmotion.Content => ContentFace,
+            FaceEmotion.Happy => HappyFace,
+            FaceEmotion.Grumpy => GrumpyFace,
+            FaceEmotion.Worried => WorriedFace,
+            FaceEmotion.Suspicious => SuspiciousFace,
+            FaceEmotion.Surprised => SurprisedFace,
+            FaceEmotion.Thinking => ThinkingFace,
+            _ => null
+        };
+    }
+
+    /// <summary>Closest available emotion when neither the library nor the built-in table has one.</summary>
+    private static FaceEmotion AliasOf(FaceEmotion emotion)
+    {
+        return emotion switch
+        {
+            FaceEmotion.Delighted => FaceEmotion.Happy,
+            FaceEmotion.Smug => FaceEmotion.Content,
+            FaceEmotion.Angry => FaceEmotion.Grumpy,
+            FaceEmotion.Disgusted => FaceEmotion.Grumpy,
+            FaceEmotion.Sad => FaceEmotion.Worried,
+            FaceEmotion.Scared => FaceEmotion.Worried,
+            _ => FaceEmotion.Neutral
+        };
+    }
+
+    /// <summary>Resolves every emotion to sparse (channel, weight) arrays for this face. Bind-time only.</summary>
+    private void BuildExpressions()
+    {
+        _builtLibrary = library;
+        if (_emotionChannels == null || _emotionChannels.Length != EmotionCount)
+        {
+            _emotionChannels = new int[EmotionCount][];
+            _emotionWeights = new float[EmotionCount][];
+        }
+
+        var channels = new List<int>(32);
+        var weights = new List<float>(32);
+
+        for (int e = 0; e < EmotionCount; e++)
+        {
+            var emotion = (FaceEmotion)e;
+            channels.Clear();
+            weights.Clear();
+
+            if (!TryResolve(emotion, channels, weights))
+            {
+                FaceEmotion alias = AliasOf(emotion);
+                if (alias != emotion) TryResolve(alias, channels, weights);
+            }
+
+            _emotionChannels[e] = channels.ToArray();
+            _emotionWeights[e] = weights.ToArray();
+        }
+    }
+
+    /// <summary>Library first, then the built-in table. False when neither produced any bound shape.</summary>
+    private bool TryResolve(FaceEmotion emotion, List<int> channels, List<float> weights)
+    {
+        if (library != null && library.TryGet(emotion, out FaceExpressionLibrary.Expression expression) &&
+            expression.weights != null)
+        {
+            for (int i = 0; i < expression.weights.Count; i++)
+            {
+                FaceExpressionLibrary.ShapeWeight sw = expression.weights[i];
+                if (sw != null) AddResolved(channels, weights, sw.shape, sw.weight);
+            }
+            if (channels.Count > 0 || emotion == FaceEmotion.Neutral) return true;
+        }
+
+        BuiltInShape[] table = BuiltInTable(emotion);
+        if (table == null) return false;
+
+        for (int i = 0; i < table.Length; i++)
+            AddResolved(channels, weights, table[i].Shape, table[i].Weight);
+        return channels.Count > 0 || emotion == FaceEmotion.Neutral;
+    }
+
+    /// <summary>Maps a shape name to channel(s): exact, else both Left/Right sides, else the unsided shape.</summary>
+    private void AddResolved(List<int> channels, List<float> weights, string shape, float weight)
+    {
+        if (string.IsNullOrEmpty(shape) || float.IsNaN(weight) || Mathf.Abs(weight) < 0.0001f) return;
+
+        string key = StripPrefix(shape);
+        if (key.Length == 0 || IsBodyShape(key)) return;
+        weight = Mathf.Clamp(weight, -1f, 1f);
+
+        int c = Channel(key);
+        if (c >= 0)
+        {
+            Accumulate(channels, weights, c, weight);
+            return;
+        }
+
+        int left = Channel(key + "Left");
+        int right = Channel(key + "Right");
+        if (left >= 0) Accumulate(channels, weights, left, weight);
+        if (right >= 0) Accumulate(channels, weights, right, weight);
+        if (left >= 0 || right >= 0) return;
+
+        if (key.EndsWith("Left", System.StringComparison.Ordinal))
+            c = Channel(key.Substring(0, key.Length - 4));
+        else if (key.EndsWith("Right", System.StringComparison.Ordinal))
+            c = Channel(key.Substring(0, key.Length - 5));
+        if (c >= 0) Accumulate(channels, weights, c, weight);
+    }
+
+    private static void Accumulate(List<int> channels, List<float> weights, int channel, float weight)
+    {
+        int existing = channels.IndexOf(channel);
+        if (existing < 0)
+        {
+            channels.Add(channel);
+            weights.Add(weight);
+        }
+        else if (Mathf.Abs(weight) > Mathf.Abs(weights[existing]))
+        {
+            weights[existing] = weight;  // Two names landed on one shape (e.g. sided -> unsided): keep the stronger
+        }
+    }
+
+    // ================================================================
+    // Layer 1: expression
+    // ================================================================
+
+    private void UpdateExpression(float now, bool thinking)
+    {
+        if (_transientActive && now >= _transientEnd)
+            _transientActive = false;
+
+        ExprKind kind;
+        FaceEmotion emotion;
+        float strength;
+        int serial = 0;
+
+        if (thinking)
+        {
+            kind = ExprKind.Thinking;
+            emotion = FaceEmotion.Thinking;
+            strength = thinkingStrength;
+        }
+        else if (_transientActive)
+        {
+            kind = ExprKind.Transient;
+            emotion = _transientEmotion;
+            strength = _transientIntensity;
+            serial = _transientSerial;
+        }
+        else
+        {
+            kind = ExprKind.Base;
+            emotion = baseMood;
+            strength = baseMoodStrength;
+        }
+
+        FillTarget(emotion, strength);
+        if (kind == ExprKind.Base)
+        {
+            // A resting mood keeps smiles, brows and eyes but not an open mouth; reactions may still open it
+            for (int c = 0; c < _channelCount; c++)
+                if (_opensMouth[c]) _exprTarget[c] *= RestingMouthOpenScale;
+        }
+        int n = _channelCount;
+
+        if (!_exprStarted)
+        {
+            System.Array.Copy(_exprTarget, _exprState, n);
+            _exprKind = kind;
+            _exprEmotion = emotion;
+            _exprSerial = serial;
+            _fadeDuration = 0f;
+            _exprStarted = true;
+            return;
+        }
+
+        // A new source: crossfade from whatever the face shows right now
+        if (kind != _exprKind || emotion != _exprEmotion || serial != _exprSerial)
+        {
+            System.Array.Copy(_exprState, _exprFrom, n);
+            _fadeDuration = kind == ExprKind.Base ? emotionFadeOut : emotionFadeIn;
+            _fadeStart = now;
+            _exprKind = kind;
+            _exprEmotion = emotion;
+            _exprSerial = serial;
+        }
+
+        // The target is rebuilt every frame, so strength tweaks apply live once the fade is done
+        float s = _fadeDuration > 0.0001f ? Mathf.Clamp01((now - _fadeStart) / _fadeDuration) : 1f;
+        if (s >= 1f)
+        {
+            System.Array.Copy(_exprTarget, _exprState, n);
+            return;
+        }
+
+        s = Mathf.SmoothStep(0f, 1f, s);
+        for (int c = 0; c < n; c++)
+            _exprState[c] = Mathf.Lerp(_exprFrom[c], _exprTarget[c], s);
+    }
+
+    private void FillTarget(FaceEmotion emotion, float strength)
+    {
+        System.Array.Clear(_exprTarget, 0, _channelCount);
+
+        int e = (int)emotion;
+        if (_emotionChannels == null || e < 0 || e >= _emotionChannels.Length || strength <= 0f) return;
+
+        int[] channels = _emotionChannels[e];
+        float[] weights = _emotionWeights[e];
+        if (channels == null) return;
+
+        for (int i = 0; i < channels.Length; i++)
+            _exprTarget[channels[i]] = weights[i] * strength;
+    }
+
+    // ================================================================
+    // Layer 2: blinks
+    // ================================================================
+
+    /// <summary>Returns the blink closure 0..1 for this frame.</summary>
+    private float UpdateBlink(float now)
+    {
+        if (!_blinking)
+        {
+            if (now < _nextBlinkTime) return 0f;
+
+            _blinking = true;
+            _blinkStart = now;
+            _blinkLength = Mathf.Max(0.05f, RandomRange(blinkDuration.x, blinkDuration.y));
+            if (_secondBlinkQueued)
+            {
+                _secondBlinkQueued = false;
+                _doubleAfterThis = false;
+            }
+            else
+            {
+                _doubleAfterThis = NextRandom() < doubleBlinkChance;
+            }
+        }
+
+        float p = (now - _blinkStart) / _blinkLength;
+        if (p >= 1f)
+        {
+            _blinking = false;
+            if (_doubleAfterThis)
+            {
+                _secondBlinkQueued = true;
+                _nextBlinkTime = now + RandomRange(0.05f, 0.12f);
+            }
+            else
+            {
+                _nextBlinkTime = now + RandomRange(blinkInterval.x, blinkInterval.y);
+            }
+            return 0f;
+        }
+
+        // Lids drop quickly and lift a little slower
+        return p < 0.4f
+            ? Mathf.SmoothStep(0f, 1f, p / 0.4f)
+            : 1f - Mathf.SmoothStep(0f, 1f, (p - 0.4f) / 0.6f);
+    }
+
+    // ================================================================
+    // Layer 3: mouth
+    // ================================================================
+
+    /// <summary>Updates the mouth layer and returns its jawOpen value (0..1) for the jaw bone.</summary>
+    private float UpdateMouth(float now, bool talking)
+    {
+        System.Array.Clear(_mouthTarget, 0, MouthCount);
+        bool speaking = IsSpeakingAudio;
+
+        // Each isTalking stretch may babble, unless audio has already spoken for it
+        if (talking && !_wasTalking)
+        {
+            _talkStart = now;
+            _stretchHadAudio = speaking;
+            ResetBabble();
+        }
+        _wasTalking = talking;
+        if (speaking) _stretchHadAudio = true;
+
+        float tau;
+        bool active;
+        if (speaking)
+        {
+            EvaluateSpeech();
+            tau = AudioMouthSmoothing;
+            active = true;
+        }
+        else if (talking && !_stretchHadAudio && babbleAmount > 0f && now - _talkStart < BabbleLimit())
+        {
+            EvaluateBabble(now);
+            tau = BabbleMouthSmoothing;
+            active = true;
+        }
+        else
+        {
+            tau = RestMouthSmoothing;
+            active = false;
+        }
+
+        // Audio keeps playing while timeScale is 0, so the mouth follows unscaled time
+        float dt = Time.unscaledDeltaTime;
+        float k = 1f - Mathf.Exp(-dt / tau);
+        for (int m = 0; m < MouthCount; m++)
+        {
+            float v = _mouthState[m] + (_mouthTarget[m] - _mouthState[m]) * k;
+            _mouthState[m] = Mathf.Abs(v) < 1e-5f ? 0f : v;  // Settle exactly, so resting shapes stop being written
+        }
+
+        _mouthActive = Mathf.MoveTowards(_mouthActive, active ? 1f : 0f, dt / MouthActiveFadeSeconds);
+        return _mouthState[MJaw];
+    }
+
+    private float BabbleLimit()
+    {
+        float limit = _identity != null && DialogueManagerV2.ActiveNPC == _identity ? dialogueBabbleSeconds : maxBabbleSeconds;
+        return limit > 0f ? limit : float.PositiveInfinity;
+    }
+
+    // ---- Audio speech ----
+
+    /// <summary>Drops the speech once its clip finished, was replaced on the source, or was destroyed.</summary>
+    private void UpdateSpeechState()
+    {
+        if (!_hasSpeech) return;
+
+        if (_speechSource == null || _speechClip == null)
+        {
+            ClearSpeech();
+            return;
+        }
+
+        if (_speechSource.clip == _speechClip && _speechSource.isPlaying)
+            _speechSeenPlaying = true;
+        else if (_speechSeenPlaying || Time.unscaledTime - _speechGivenAt > SpeechStartGrace)
+            ClearSpeech();
+    }
+
+    private void ClearSpeech()
+    {
+        _hasSpeech = false;
+        _speechSource = null;
+        _speechClip = null;
+        _speechSeenPlaying = false;
+        _cues = null;
+        _cuesArrivedAt = -1f;
+        _envelopeLength = 0;
+    }
+
+    private void EvaluateSpeech()
+    {
+        AudioClip clip = _speechClip;
+        float t = clip.frequency > 0 ? _speechSource.timeSamples / (float)clip.frequency : _speechSource.time;
+
+        float cueMix = 0f;
+        if (_cues != null && _cues.Length > 0)
+            cueMix = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((Time.unscaledTime - _cuesArrivedAt) / CueArrivalBlendSeconds));
+
+        if (cueMix < 1f)
+        {
+            // Loudness jaw, with a slow drift between a wider and a rounder mouth so it isn't a pure hinge
+            float level = LoudnessAt(t) * (1f - cueMix);
+            float drift = Mathf.PerlinNoise(_noiseSeed, t * 2.3f) * 2f - 1f;
+            float stretch = level * 0.12f * Mathf.Max(0f, drift);
+            _mouthTarget[MJaw] += loudnessJaw * level;
+            _mouthTarget[MStretchL] += stretch;
+            _mouthTarget[MStretchR] += stretch;
+            _mouthTarget[MFunnel] += level * 0.18f * Mathf.Max(0f, -drift);
+        }
+
+        if (cueMix > 0f)
+        {
+            EvaluateCues(t, out int previous, out int current, out float blend);
+            for (int m = 0; m < MouthCount; m++)
+                _mouthTarget[m] += Mathf.Lerp(CuePoses[previous, m], CuePoses[current, m], blend) * cueMix;
+        }
+    }
+
+    /// <summary>The cue at time t and the one before it, with a 40 ms blend between them (ported from XybridAvatarPlayer).</summary>
+    private void EvaluateCues(float t, out int previous, out int current, out float blend)
+    {
+        LipSyncCue[] cues = _cues;
+        previous = CueX;
+        current = CueX;
+        blend = 1f;
+
+        int lo = 0, hi = cues.Length - 1, found = -1;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) / 2;
+            if (t < cues[mid].start) hi = mid - 1;
+            else
+            {
+                found = mid;
+                lo = mid + 1;
+            }
+        }
+
+        if (found < 0 || t >= cues[found].end) return;
+
+        current = CueIndex(cues[found].shape);
+        if (found > 0 && cues[found - 1].end >= cues[found].start - 0.001f)
+            previous = CueIndex(cues[found - 1].shape);
+        blend = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((t - cues[found].start) / CueBlendSeconds));
+    }
+
+    private static int CueIndex(char shape)
+    {
+        char c = char.ToUpperInvariant(shape);
+        return c >= 'A' && c <= 'H' ? c - 'A' : CueX;
+    }
+
+    /// <summary>Copies the cues, dropping invalid ones and sorting by start. Null if none are usable.</summary>
+    private static LipSyncCue[] SanitizeCues(LipSyncCue[] cues)
+    {
+        int valid = 0;
+        for (int i = 0; i < cues.Length; i++)
+            if (IsValidCue(cues[i])) valid++;
+        if (valid == 0) return null;
+
+        var clean = new LipSyncCue[valid];
+        bool sorted = true;
+        int j = 0;
+        for (int i = 0; i < cues.Length; i++)
+        {
+            if (!IsValidCue(cues[i])) continue;
+            clean[j] = cues[i];
+            if (j > 0 && clean[j].start < clean[j - 1].start) sorted = false;
+            j++;
+        }
+
+        if (!sorted)
+            System.Array.Sort(clean, (a, b) => a.start.CompareTo(b.start));
+        return clean;
+    }
+
+    private static bool IsValidCue(LipSyncCue cue)
+    {
+        return !float.IsNaN(cue.start) && !float.IsNaN(cue.end) &&
+               !float.IsInfinity(cue.start) && !float.IsInfinity(cue.end) && cue.end > cue.start;
+    }
+
+    /// <summary>Gated loudness 0..1 at time t: the precomputed envelope, else the source's live output.</summary>
+    private float LoudnessAt(float t)
+    {
+        if (_envelopeLength > 0)
+        {
+            float x = Mathf.Max(0f, t) / EnvelopeHop;
+            int i = Mathf.Clamp(Mathf.FloorToInt(x), 0, _envelopeLength - 1);
+            return i + 1 < _envelopeLength ? Mathf.Lerp(_envelope[i], _envelope[i + 1], x - i) : _envelope[i];
+        }
+
+        // Clip samples couldn't be read ahead (streamed/compressed): follow the live output instead
+        _speechSource.GetOutputData(_outputBuffer, 0);
+        float sum = 0f;
+        for (int i = 0; i < _outputBuffer.Length; i++)
+            sum += _outputBuffer[i] * _outputBuffer[i];
+
+        float rms = Mathf.Sqrt(sum / _outputBuffer.Length);
+        _livePeak = Mathf.Max(_livePeak * 0.998f, rms);
+        return Gate(rms / Mathf.Max(_livePeak, 1e-4f));
+    }
+
+    /// <summary>
+    /// RMS in 10 ms hops, opened fast and closed slower, normalised to the clip's 95th percentile and gated
+    /// so pauses close the mouth (ported from XybridAvatarPlayer.LoudnessEnvelope). Main thread only.
+    /// Leaves _envelopeLength at 0 when the samples can't be read.
+    /// </summary>
+    private void ComputeEnvelope(AudioClip clip)
+    {
+        _envelopeLength = 0;
+        int samples = clip.samples;
+        int channels = clip.channels;
+        if (samples <= 0 || channels <= 0 || clip.frequency <= 0) return;
+        if (clip.loadType == AudioClipLoadType.Streaming) return;
+
+        int hop = Mathf.Max(1, Mathf.RoundToInt(EnvelopeHop * clip.frequency));
+        int frames = (samples + hop - 1) / hop;
+        EnsureCapacity(ref _envelope, frames);
+        EnsureCapacity(ref _envelopeSort, frames);
+
+        // Read in hop-aligned chunks so a long line doesn't allocate its whole PCM buffer
+        int chunkFrames = hop * 64;
+        int chunkLength = chunkFrames * channels;
+        if (_pcmChunk == null || _pcmChunk.Length != chunkLength)
+            _pcmChunk = new float[chunkLength];
+
+        float attack = 1f - Mathf.Exp(-EnvelopeHop / 0.025f);
+        float release = 1f - Mathf.Exp(-EnvelopeHop / 0.08f);
+        float level = 0f;
+        int f = 0;
+
+        for (int offset = 0; offset < samples; offset += chunkFrames)
+        {
+            int count = Mathf.Min(chunkFrames, samples - offset);
+            // GetData reads buffer.Length / channels frames, so the tail gets an exact-size buffer
+            float[] buffer = count == chunkFrames ? _pcmChunk : new float[count * channels];
+
+            bool ok;
+            try { ok = clip.GetData(buffer, offset); }
+            catch (System.Exception) { ok = false; }
+            if (!ok) return;
+
+            for (int h = 0; h < count && f < frames; h += hop)
+            {
+                int end = Mathf.Min(count, h + hop);
+                double sum = 0;
+                for (int i = h; i < end; i++)
+                {
+                    float mono = 0f;
+                    int baseIndex = i * channels;
+                    for (int ch = 0; ch < channels; ch++) mono += buffer[baseIndex + ch];
+                    mono /= channels;
+                    sum += mono * mono;
+                }
+
+                float rms = Mathf.Sqrt((float)(sum / (end - h)));
+                level += (rms - level) * (rms > level ? attack : release);
+                _envelope[f++] = level;
+            }
+        }
+
+        if (f == 0) return;
+
+        System.Array.Copy(_envelope, _envelopeSort, f);
+        System.Array.Sort(_envelopeSort, 0, f);
+        float reference = Mathf.Max(_envelopeSort[Mathf.Clamp(Mathf.RoundToInt(f * 0.95f), 0, f - 1)], 1e-4f);
+        for (int i = 0; i < f; i++)
+            _envelope[i] = Gate(_envelope[i] / reference);
+
+        _envelopeLength = f;
+    }
+
+    private static float Gate(float level) => Mathf.Clamp01((level - 0.12f) / 0.88f);
+
+    private static void EnsureCapacity(ref float[] buffer, int length)
+    {
+        if (buffer == null || buffer.Length < length)
+            buffer = new float[Mathf.NextPowerOfTwo(Mathf.Max(length, 64))];
+    }
+
+    // ---- Babble ----
+
+    private void ResetBabble()
+    {
+        _firstSyllable = true;
+        _syllablesLeftInWord = 0;
+        _syllableLength = 0f;
+        _syllableStart = _talkStart;
+        _syllableIsGap = false;
+    }
+
+    /// <summary>Procedural syllables (~4-6 Hz) over the cue poses, grouped into short words.</summary>
+    private void EvaluateBabble(float now)
+    {
+        if (now - _syllableStart >= _syllableLength)
+            NextSyllable(now);
+
+        if (_syllableIsGap) return;  // Word gap: mouth rests
+
+        float age = now - _talkStart;
+        float fade = Mathf.Clamp01(age / 0.08f);
+        float limit = BabbleLimit();
+        if (!float.IsPositiveInfinity(limit))
+            fade *= Mathf.Clamp01((limit - age) / 0.4f);
+
+        float p = Mathf.Clamp01((now - _syllableStart) / _syllableLength);
+        float open = Mathf.Sin(p * Mathf.PI);
+        // Lips stay a little parted between syllables of a word; a closed (A) syllable presses fully
+        if (_syllableShape != CueA) open = 0.2f + 0.8f * open;
+
+        float amount = open * _syllableAmp * babbleAmount * fade;
+        for (int m = 0; m < MouthCount; m++)
+            _mouthTarget[m] += CuePoses[_syllableShape, m] * amount;
+    }
+
+    private void NextSyllable(float now)
+    {
+        _syllableStart = now;
+
+        if (_syllablesLeftInWord <= 0)
+        {
+            _syllablesLeftInWord = 1 + (int)(NextRandom() * 4f);  // 1..4 syllables per word
+            if (!_firstSyllable)
+            {
+                _syllableIsGap = true;
+                _syllableLength = RandomRange(0.1f, 0.28f);
+                return;
+            }
+        }
+
+        _firstSyllable = false;
+        _syllableIsGap = false;
+        _syllablesLeftInWord--;
+        _syllableLength = 1f / Mathf.Max(0.5f, RandomRange(babbleRate.x, babbleRate.y));
+        _syllableAmp = RandomRange(0.6f, 1f);
+
+        int shape = PickBabbleShape();
+        if (shape == _syllableShape) shape = PickBabbleShape();  // Fewer repeats reads more like speech
+        _syllableShape = shape;
+    }
+
+    private int PickBabbleShape()
+    {
+        float r = NextRandom();
+        if (r < 0.10f) return CueA;
+        if (r < 0.32f) return CueB;
+        if (r < 0.58f) return CueC;
+        if (r < 0.74f) return CueD;
+        if (r < 0.88f) return CueE;
+        return CueF;
+    }
+
+    // ================================================================
+    // Compose + write
+    // ================================================================
+
+    private void Compose(float blink)
+    {
+        if (_face == null || !_face.enabled || !_face.gameObject.activeInHierarchy) return;
+
+        int n = _channelCount;
+        System.Array.Clear(_add, 0, n);
+
+        for (int m = 0; m < MouthCount; m++)
+        {
+            int c = _mouthChannel[m];
+            if (c >= 0) _add[c] += _mouthState[m];
+        }
+
+        if (blink > 0f)
+        {
+            if (_blinkUpperL >= 0) _add[_blinkUpperL] += blink;
+            if (_blinkUpperR >= 0) _add[_blinkUpperR] += blink;
+            if (_blinkLowerL >= 0) _add[_blinkLowerL] += blink * 0.3f;
+            if (_blinkLowerR >= 0) _add[_blinkLowerR] += blink * 0.3f;
+        }
+
+        // Lip safety: the expression's mouth gives way while the lips are shaping words
+        float lipScale = Mathf.Lerp(1f, speakingExpressionMouth, _mouthActive);
+        float wideScale = 1f - blink;
+
+        for (int c = 0; c < n; c++)
+        {
+            float expr = _exprState[c];
+            if (_isMouthChannel[c]) expr *= lipScale;
+            else if (_isEyeWide[c]) expr *= wideScale;
+
+            float offset = expr + _add[c];
+            // Untouched shapes keep their exact rest weight (never clamped or rewritten)
+            float value = offset == 0f ? _rest[c] : Mathf.Clamp(_rest[c] + offset * 100f, 0f, 100f);
+            if (Mathf.Abs(value - _written[c]) <= 0.01f) continue;
+
+            _face.SetBlendShapeWeight(_shapeIndex[c], value);
+            _written[c] = value;
+        }
+    }
+
+    // ================================================================
+    // Layer 4: jaw bone (optional)
+    // ================================================================
+
+    private void ApplyJawBone(float jaw)
+    {
+        if (_jawBone == null) return;
+        if (jawBoneDegrees <= 0f)
+        {
+            RestoreJawBone();
+            return;
+        }
+
+        Quaternion animated = _jawBone.localRotation;
+        // A culled or paused Animator doesn't rewrite the bone: don't stack on top of our own last write
+        if (_jawWritten && animated == _jawLastWritten) animated = _jawBase;
+
+        _jawBase = animated;
+        _jawLastWritten = animated * Quaternion.AngleAxis(Mathf.Clamp01(jaw) * jawBoneDegrees, Vector3.right);
+        _jawBone.localRotation = _jawLastWritten;
+        _jawWritten = true;
+    }
+
+    private void RestoreJawBone()
+    {
+        if (!_jawWritten) return;
+        _jawWritten = false;
+        if (_jawBone != null && _jawBone.localRotation == _jawLastWritten)
+            _jawBone.localRotation = _jawBase;
+    }
+
+    // ================================================================
+    // Animator flags
+    // ================================================================
+
+    private void ReadAnimatorFlags(out bool talking, out bool thinking)
+    {
+        talking = false;
+        thinking = false;
+        if (animator == null || !animator.isActiveAndEnabled || !animator.isInitialized) return;
+
+        RuntimeAnimatorController controller = animator.runtimeAnimatorController;
+        if (controller == null) return;
+
+        // Look the parameters up once per controller (they can read as empty during the first frames)
+        if (!ReferenceEquals(controller, _checkedController))
+        {
+            if (animator.parameterCount == 0) return;
+
+            _checkedController = controller;
+            _hasTalkingParam = false;
+            _hasThinkingParam = false;
+            foreach (AnimatorControllerParameter p in animator.parameters)
+            {
+                if (p.type != AnimatorControllerParameterType.Bool) continue;
+                if (p.nameHash == IsTalkingHash) _hasTalkingParam = true;
+                else if (p.nameHash == IsThinkingHash) _hasThinkingParam = true;
+            }
+        }
+
+        if (_hasTalkingParam) talking = animator.GetBool(IsTalkingHash);
+        if (_hasThinkingParam) thinking = animator.GetBool(IsThinkingHash);
+    }
+
+    // ================================================================
+    // Randomness
+    // ================================================================
+
+    private void SeedRandom()
+    {
+        // FNV-1a over the name, mixed with a per-run value so identical names still differ
+        uint h = 2166136261u;
+        string n = name;
+        for (int i = 0; i < n.Length; i++)
+        {
+            h ^= n[i];
+            h *= 16777619u;
+        }
+        h ^= (uint)Random.Range(1, int.MaxValue);
+        _rngState = h != 0u ? h : 0x9E3779B9u;
+        _noiseSeed = NextRandom() * 1000f;
+    }
+
+    /// <summary>xorshift32, uniform in [0, 1).</summary>
+    private float NextRandom()
+    {
+        uint x = _rngState;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        _rngState = x;
+        return (x & 0xFFFFFFu) / 16777216f;
+    }
+
+    private float RandomRange(float min, float max)
+    {
+        return min + (max - min) * NextRandom();
+    }
+}
