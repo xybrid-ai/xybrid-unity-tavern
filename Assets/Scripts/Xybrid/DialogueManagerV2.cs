@@ -56,8 +56,6 @@ public class DialogueManagerV2 : MonoBehaviour
 
     [Header("TTS Audio")]
     [SerializeField] private TTSAudioPlayer _ttsPlayer;
-    [Tooltip("Mouth shapes from phoneme timings start this much before their sound. Kokoro's timings trail the audible speech by ~45 ms.")]
-    [SerializeField, Range(0f, 0.15f)] private float phonemeLipSyncLead = 0.045f;
 
     [Header("Debug")]
     [SerializeField] private NPCDebugPanel npcDebugPanel;
@@ -436,8 +434,8 @@ public class DialogueManagerV2 : MonoBehaviour
 
     /// <summary>
     /// Synthesizes and plays <paramref name="text"/> in <paramref name="npc"/>'s voice, positioned at their head.
-    /// Their NPCFace (if any) lip-syncs from the model's phoneme timings when it reports them; otherwise from
-    /// the clip's spectrum right away, then from Rhubarb visemes once analysed.
+    /// Their NPCFace (if any) lip-syncs from the clip's spectrum right away, then from Rhubarb visemes once
+    /// analysed (Phonon reports no timings of its own).
     /// </summary>
     private async Task PlayTTSAsync(NPCIdentity npc, string text, string voiceId, float speed = 1.0f)
     {
@@ -449,13 +447,13 @@ public class DialogueManagerV2 : MonoBehaviour
         int session = _dialogueSession;
         try
         {
-            XybridModelService.TtsLine line = await service.RunTTSWithTimingsAsync(text, voiceId, speed);
+            byte[] pcm = await service.RunTTSAsync(text, voiceId, speed);
             // Dialogue closed (and maybe another opened) while synthesizing: stay silent
             if (session != _dialogueSession || _ttsPlayer == null) return;
-            if (line == null || line.Pcm == null || line.Pcm.Length == 0) return;
+            if (pcm == null || pcm.Length == 0) return;
 
             _ttsPlayer.SetSpeaker(npc != null ? npc.transform : null);
-            AudioClip clip = _ttsPlayer.PlayPCM(line.Pcm);
+            AudioClip clip = _ttsPlayer.PlayPCM(pcm);
             if (clip == null || npc == null) return;
 
             // Explicit null checks rather than ?. : a destroyed face must not be called
@@ -463,18 +461,8 @@ public class DialogueManagerV2 : MonoBehaviour
             if (face == null) return;
             face.Speak(_ttsPlayer.Source, clip, text);
 
-            // Exact visemes from the phonemes the model actually spoke; null if it reported none or they don't fit
-            LipSyncCue[] phonemeCues = line.Phonemes == null ? null : PhonemeLipSync.FromPhonemes(
-                line.Phonemes, clip.length, phonemeLipSyncLead, PhonemeLipSync.FindSpeechOnset(clip));
-            if (phonemeCues != null)
-            {
-                Debug.Log($"[DialogueManager] Lip sync for {npc.name} from {line.Phonemes.Length} phonemes ({phonemeCues.Length} cues)");
-                face.SetLipSyncCues(clip, phonemeCues);
-                return;
-            }
-
-            // Instant in-engine visemes from the clip's spectrum (works everywhere); Rhubarb, when it
-            // can run (it's x86_64-only on macOS), refines them a moment later
+            // Instant in-engine visemes from the clip's spectrum (works everywhere); Rhubarb, guided by
+            // the transcript, refines them a moment later
             LipSyncCue[] spectralCues = SpectralLipSync.Analyze(clip);
             if (spectralCues != null)
                 face.SetLipSyncCues(clip, spectralCues);
@@ -484,6 +472,7 @@ public class DialogueManagerV2 : MonoBehaviour
             // Stale session, failed analysis, or the clip was replaced/destroyed by a newer line
             if (session != _dialogueSession || cues == null || face == null || clip == null) return;
             face.SetLipSyncCues(clip, cues);
+            Debug.Log($"[DialogueManager] Lip sync for {face.name} from Rhubarb ({cues.Length} cues)");
         }
         catch (System.Exception ex)
         {

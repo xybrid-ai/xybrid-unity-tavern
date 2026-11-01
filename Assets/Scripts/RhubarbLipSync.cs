@@ -11,7 +11,8 @@ using Debug = UnityEngine.Debug;
 
 /// <summary>
 /// Runs the Rhubarb Lip Sync 1.14 CLI on a spoken TTS clip and returns its mouth cues (shapes A-H and X)
-/// for <see cref="NPCFace"/>. macOS only: the binary ships in StreamingAssets/Rhubarb.
+/// for <see cref="NPCFace"/>. macOS only: the binary ships in StreamingAssets/Rhubarb, as a universal build
+/// (arm64 compiled from the 1.14.0 source, plus the official x86_64 release) so Apple silicon needs no Rosetta 2.
 /// Every failure returns null, so the face simply keeps its loudness-driven jaw.
 ///
 /// Rhubarb 1.14 crashes (SIGSEGV in its PocketSphinx log callback) when its folder path is longer than
@@ -182,7 +183,7 @@ public static class RhubarbLipSync
             string failure = RunRhubarb(executable, arguments, timeoutSeconds, token, out string failureKind);
             if (failure != null)
             {
-                // A binary that can't even start won't start next line either (e.g. the x86_64-only
+                // A binary that can't even start won't start next line either (e.g. an x86_64-only
                 // Rhubarb on Apple Silicon without Rosetta 2): stop trying this session
                 if (failureKind == "launch") _available = false;
                 if (failureKind != "cancelled") Warn(failureKind, failure);
@@ -477,8 +478,8 @@ public static class RhubarbLipSync
 
     private static string ArchitectureHint() =>
         RuntimeInformation.ProcessArchitecture == Architecture.Arm64
-            ? " The shipped Rhubarb 1.14 is x86_64-only: on Apple Silicon it needs Rosetta 2 " +
-              "(softwareupdate --install-rosetta --agree-to-license)."
+            ? " On Apple Silicon the shipped rhubarb needs an arm64 slice (check with lipo -info); the official " +
+              "1.14 release is x86_64-only and needs Rosetta 2 (softwareupdate --install-rosetta --agree-to-license)."
             : "";
 
     private static string PipeText(Task<string> pipe)
