@@ -38,6 +38,7 @@ public static class RhubarbLipSync
     private static bool _checked;
     private static volatile bool _available;
     private static string _shippedExecutable;
+    private static string _launcher;   // Prepared copy, reused for the rest of the session (guarded by LauncherGate)
 
     // ================================================================
     // Public API
@@ -81,11 +82,12 @@ public static class RhubarbLipSync
     }
 
     /// <summary>
-    /// Analyses <paramref name="clip"/> with Rhubarb (phonetic recognizer, guided by the transcript) and
+    /// Analyses <paramref name="clip"/> with Rhubarb (phonetic recognizer) and
     /// returns its mouth cues, ordered and clamped to the clip length. Returns null on any failure,
     /// on cancellation, or when Rhubarb is unavailable.
-    /// MUST be called on the main thread: the clip's samples are copied here, then the WAV/transcript
-    /// writing, the CLI run and the JSON parsing all happen on a background task.
+    /// MUST be called on the main thread: the clip's samples are copied here, then the WAV writing, the CLI
+    /// run and the JSON parsing all happen on a background task. <paramref name="transcript"/> is not passed on:
+    /// the phonetic recognizer ignores Rhubarb's --dialogFile (its cues are identical with and without one).
     /// </summary>
     public static async Task<LipSyncCue[]> AnalyzeAsync(AudioClip clip, string transcript,
         CancellationToken cancellationToken = default, float timeoutSeconds = 10f)
@@ -122,13 +124,12 @@ public static class RhubarbLipSync
         }
 
         string shipped = _shippedExecutable;
-        string text = transcript ?? string.Empty;
         float timeout = timeoutSeconds > 0f ? timeoutSeconds : 10f;
 
         try
         {
             return await Task.Run(() =>
-                Analyze(shipped, samples, channels, frequency, clipLength, text, timeout, cancellationToken));
+                Analyze(shipped, samples, channels, frequency, clipLength, timeout, cancellationToken));
         }
         catch (Exception ex)
         {
@@ -137,12 +138,33 @@ public static class RhubarbLipSync
         }
     }
 
+    /// <summary>
+    /// Prepares the launcher copy in the background so the first line doesn't pay for it. Safe to call more than
+    /// once; failures are left for the first real analysis to report. Call from the main thread.
+    /// </summary>
+    public static void Prewarm()
+    {
+        if (!IsAvailable) return;
+        string shipped = _shippedExecutable;
+        Task.Run(() =>
+        {
+            try
+            {
+                Launcher(shipped);
+            }
+            catch (Exception)
+            {
+                // AnalyzeAsync retries and warns
+            }
+        });
+    }
+
     // ================================================================
     // Background work
     // ================================================================
 
     private static LipSyncCue[] Analyze(string shipped, float[] samples, int channels, int frequency,
-        float clipLength, string transcript, float timeoutSeconds, CancellationToken token)
+        float clipLength, float timeoutSeconds, CancellationToken token)
     {
         string executable;
         try
@@ -166,18 +188,11 @@ public static class RhubarbLipSync
 
             string wav = Path.Combine(directory, "speech.wav");
             string cues = Path.Combine(directory, "mouth.json");
-            string dialog = Path.Combine(directory, "script.txt");
 
             WriteWav(wav, samples, channels, frequency);
-
-            bool hasDialog = !string.IsNullOrWhiteSpace(transcript);
-            if (hasDialog)
-                File.WriteAllText(dialog, transcript, new UTF8Encoding(false));
-
             if (token.IsCancellationRequested) return null;
 
             string arguments = "-r phonetic -f json --quiet --threads 2 " +
-                               (hasDialog ? "--dialogFile " + Quote(dialog) + " " : "") +
                                "-o " + Quote(cues) + " " + Quote(wav);
 
             string failure = RunRhubarb(executable, arguments, timeoutSeconds, token, out string failureKind);
@@ -310,7 +325,8 @@ public static class RhubarbLipSync
 
     /// <summary>
     /// The path to start Rhubarb from: a copy in $TMPDIR/tavern-rhubarb-&lt;hash of the shipped folder&gt;/
-    /// (refreshed when the shipped binary changes) next to a symlink to the shipped res/ folder.
+    /// (refreshed when the shipped binary changes) next to a symlink to the shipped res/ folder. Prepared once
+    /// per session: re-copying it costs three extra process launches and a slow first run of the new copy.
     /// </summary>
     private static string Launcher(string shipped)
     {
@@ -331,11 +347,19 @@ public static class RhubarbLipSync
 
         lock (LauncherGate)
         {
+            if (_launcher == binary && File.Exists(binary)) return binary;
+
+            // Mono stores the copy's modification time to the microsecond while APFS keeps nanoseconds,
+            // so the times are compared with a tolerance (an exact match never happens)
             var original = new FileInfo(shipped);
             var copy = new FileInfo(binary);
             if (copy.Exists && copy.Length == original.Length &&
-                copy.LastWriteTimeUtc == original.LastWriteTimeUtc && Directory.Exists(resources))
+                Math.Abs((copy.LastWriteTimeUtc - original.LastWriteTimeUtc).TotalSeconds) < 1.0 &&
+                Directory.Exists(resources))
+            {
+                _launcher = binary;
                 return binary;
+            }
 
             Directory.CreateDirectory(folder);
             File.Copy(shipped, binary, true);
@@ -345,6 +369,7 @@ public static class RhubarbLipSync
             // absent (xattr then exits non-zero), so this step is best effort.
             RunTool("/usr/bin/xattr", "-d com.apple.quarantine " + Quote(binary), required: false);
             RunTool("/bin/ln", "-sfn " + Quote(Path.Combine(source, "res")) + " " + Quote(resources), required: true);
+            _launcher = binary;
             return binary;
         }
     }
@@ -529,6 +554,10 @@ public static class RhubarbLipSync
         _checked = false;
         _available = false;
         _shippedExecutable = null;
+        lock (LauncherGate)
+        {
+            _launcher = null;
+        }
         lock (WarnedKinds)
         {
             WarnedKinds.Clear();

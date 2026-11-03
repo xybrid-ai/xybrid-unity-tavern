@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 
 /// <summary>
@@ -14,13 +15,17 @@ public struct LipSyncCue
 }
 
 /// <summary>
-/// Drives an NPC's face blend shapes in four layers, all written once per frame in LateUpdate as
-/// offsets on top of the character's sculpted rest weights:
+/// Drives an NPC's face in five layers, all written once per frame in LateUpdate as offsets on top of the
+/// character's sculpted rest weights and the animated pose:
 /// (1) expression: the base mood, replaced by a transient emotion (<see cref="ShowEmotion"/>) or the
-/// Thinking face while the Animator's isThinking is on; (2) natural blinks; (3) mouth: TTS audio given to
+/// Thinking face while the Animator's isThinking is on, with the library's idle face capture looping on top;
+/// (2) blinks, at random and on the speech's pauses and line ends; (3) mouth: TTS audio given to
 /// <see cref="Speak"/> (Rhubarb cues once they arrive, the clip's loudness until then), procedural babble
-/// while isTalking is on without audio (table chatter), otherwise rest; (4) the jaw bone, held at its closed
-/// bind pose (clips without a jaw curve leave a humanoid jaw open) plus an optional opening with the mouth.
+/// while isTalking is on without audio (table chatter), otherwise rest; (4) speech gestures (<see cref="FaceGestures"/>):
+/// brow beats, Duchenne squints and sneers on the line's accents (found by <see cref="SpeechProsody"/>), head
+/// beats, posture shifts and question tilts on the neck and head bones, and gaze (look-aways, face scanning) on
+/// the eye bones, which also counter-rotate against the head motion so the look-at target holds; (5) the jaw bone,
+/// held at its closed bind pose (clips without a jaw curve leave a humanoid jaw open) plus an optional opening.
 /// Body-shape blend shapes (defaultHeavy, defaultBuff, defaultSkinny, masculineFeminine) are never written.
 /// Attach to the NPC root, next to the Animator.
 /// </summary>
@@ -55,7 +60,8 @@ public class NPCFace : MonoBehaviour
     // Lips meet by pressing (A; G adds a raised upper lip so the upper teeth show over the lower one), never by
     // mouthClose alone: on the Sidekick rig that corrective only makes sense against an open jaw (Compose caps it
     // to one). mouthRollLower is left out: it folds a second dark crease under the lower lip.
-    // B keeps the teeth together with the lips parted; rounded E/F stay soft (a 0.8 pucker read as a kiss).
+    // B keeps the teeth together with the lips parted; rounded E/F stay soft (a 0.8 pucker read as a kiss); H lifts
+    // the tongue behind the teeth (any tongueOut pokes it past them on the Sidekick rig).
     private static readonly float[,] CuePoses =
     {
         //  jaw   close pressL pressR strL  strR  funnel pucker rollLo rollUp lowL  lowR  upL   upR   tUp   tOut
@@ -66,7 +72,7 @@ public class NPCFace : MonoBehaviour
         { .3f,   0f,   0f,    0f,    0f,   0f,   .45f,  .12f,  0f,    0f,    .1f,  .1f,  0f,   0f,   0f,   0f   }, // E  rounded (AO, ER)
         { .14f,  .3f,  0f,    0f,    0f,   0f,   .22f,  .5f,   0f,    0f,    0f,   0f,   0f,   0f,   0f,   0f   }, // F  puckered (UW, OW, W)
         { .06f,  0f,   .2f,   .2f,   0f,   0f,   0f,    0f,    0f,    0f,    0f,   0f,   .4f,  .4f,  0f,   0f   }, // G  teeth on lip (F, V)
-        { .3f,   0f,   0f,    0f,    0f,   0f,   0f,    0f,    0f,    0f,    .15f, .15f, 0f,   0f,   .45f, .12f }, // H  tongue up (L)
+        { .3f,   0f,   0f,    0f,    0f,   0f,   0f,    0f,    0f,    0f,    .15f, .15f, 0f,   0f,   .4f,  0f   }, // H  tongue up (L)
         { 0f,    0f,   0f,    0f,    0f,   0f,   0f,    0f,    0f,    0f,    0f,   0f,   0f,   0f,   0f,   0f   }, // X  rest
     };
 
@@ -81,6 +87,11 @@ public class NPCFace : MonoBehaviour
     private const float BabbleMouthSmoothing = 0.045f;
     private const float RestMouthSmoothing = 0.06f;
     private const float MouthActiveFadeSeconds = 0.2f;   // Lip-safety scaling of expression mouth shapes
+    private const float BlinkRefractorySeconds = 0.6f;   // Speech-timed blinks never follow another this closely
+    private const float SpeakingBlinkRate = 1.25f;       // Random blinks come this much more often while talking
+    private const float NeckShare = 0.4f;                // Of each head gesture, the rest turns the head bone
+    private const float EmphasisOpen = 0.25f;            // Extra opening on accented syllables
+    private const float MinStylingIntensity = 0.45f;     // Weaker line emotions keep the base mood's gesture style
     private const float BindRetrySeconds = 1f;
     private const int MaxBindAttempts = 5;
 
@@ -103,12 +114,15 @@ public class NPCFace : MonoBehaviour
     [SerializeField] private float emotionFadeIn = 0.3f;
     [Tooltip("Seconds to release back to the base mood.")]
     [SerializeField] private float emotionFadeOut = 0.8f;
+    [Tooltip("Strength of the library's idle face capture (brows, nose, cheeks and lips drifting a little), looped " +
+             "on top of every expression so a resting face is never frozen. 0 = off.")]
+    [SerializeField, Range(0f, 1.5f)] private float ambientMotion = 0.8f;
 
     [Header("Blinks")]
     [Tooltip("Seconds between blinks, picked randomly in this range (x = min, y = max).")]
     [SerializeField] private Vector2 blinkInterval = new Vector2(2.2f, 5.5f);
-    [Tooltip("Seconds for one close-and-open, picked randomly in this range.")]
-    [SerializeField] private Vector2 blinkDuration = new Vector2(0.12f, 0.16f);
+    [Tooltip("Seconds for one close-and-open, picked randomly in this range (a fast close, a slower opening).")]
+    [SerializeField] private Vector2 blinkDuration = new Vector2(0.2f, 0.28f);
     [SerializeField, Range(0f, 1f)] private float doubleBlinkChance = 0.15f;
 
     [Header("Mouth")]
@@ -131,6 +145,18 @@ public class NPCFace : MonoBehaviour
     [SerializeField] private float dialogueBabbleSeconds = 4f;
     [Tooltip("Expression mouth/jaw/cheekPuff shapes are scaled by this while the mouth moves, so lip shapes stay readable.")]
     [SerializeField, Range(0f, 1f)] private float speakingExpressionMouth = 0.4f;
+
+    [Header("Speech Gestures")]
+    [Tooltip("Overall size of brow beats, head motion and look-aways (1 = a typical speaker; calm or muttering " +
+             "characters lower, animated ones higher). Look-aways scale within 0.5-1.25 of their natural size.")]
+    [SerializeField, Range(0f, 2f)] private float expressiveness = 1f;
+    [Tooltip("Brow beats, nods, blinks and glances timed to each voiced line's emphasis and pauses (and to babble).")]
+    [SerializeField] private bool speechGestures = true;
+    [Tooltip("Move the neck and head bones: beats, posture shifts, question tilts.")]
+    [SerializeField] private bool headMotion = true;
+    [Tooltip("Move the eye bones: look-aways while talking or thinking and small saccades across the listener's face. " +
+             "They also hold their target while the head moves.")]
+    [SerializeField] private bool eyeMotion = true;
 
     [Header("Jaw Bone")]
     [Tooltip("Hold the humanoid Jaw bone at the avatar's closed bind pose every frame. Clips without a jaw curve " +
@@ -187,6 +213,15 @@ public class NPCFace : MonoBehaviour
     private float _transientEnd;
     private int _transientSerial;
 
+    // ---- Ambient motion (looping idle capture) ----
+    private int[] _ambientChannels;
+    private float[][] _ambientSamples;
+    private int _ambientCount;          // Samples per channel (one cycle)
+    private float _ambientRate;
+    private float _ambientPhase;        // Seconds into the cycle at time 0, per instance
+    private float _ambientSpeed = 1f;   // Per instance, so NPCs don't twitch in step
+    private float[] _ambient;           // This frame's offsets per channel
+
     // ---- Blink layer ----
     private bool _blinking;
     private float _blinkStart;
@@ -234,6 +269,63 @@ public class NPCFace : MonoBehaviour
     private Quaternion _jawBase;
     private Quaternion _jawLastWritten;
 
+    // ---- Speech gestures ----
+    private FaceGestures _gestures;
+    private Task<ProsodyTrack> _prosodyTask;
+    private AudioClip _prosodyClip;
+    private string _speechText;
+    private bool _gestureLine;          // A voiced line's gestures are running
+    private bool _babbleGestures;       // Babble's gestures are running
+    private float _asymmetry;           // Left/right gain difference of gesture shapes, per instance
+    private GestureShape[] _raiseShapes, _knitShapes, _worryShapes, _squintShapes, _sneerShapes, _wideShapes;
+    private BoneOffset _neck, _head, _eyeL, _eyeR;
+    private float _lastBlinkEnd = -10f;
+
+    /// <summary>A blend shape a gesture moves: channel, weight and side (-1 left, 0 both, 1 right).</summary>
+    private struct GestureShape
+    {
+        public int Channel;
+        public float Weight;
+        public int Side;
+    }
+
+    /// <summary>
+    /// A bone this component rotates on top of the animation. Remembers the animated rotation so a culled or
+    /// paused Animator (which doesn't rewrite the bone) never stacks our offset on our own last write.
+    /// </summary>
+    private struct BoneOffset
+    {
+        public Transform Bone;
+        private bool _written;
+        private Quaternion _base, _last;
+
+        public void Bind(Transform bone)
+        {
+            Restore();
+            Bone = bone;
+        }
+
+        public void BeginFrame()
+        {
+            if (Bone == null) return;
+            if (_written && Bone.localRotation == _last) Bone.localRotation = _base;
+            _base = Bone.localRotation;
+        }
+
+        public void EndFrame()
+        {
+            if (Bone == null) return;
+            _last = Bone.localRotation;
+            _written = true;
+        }
+
+        public void Restore()
+        {
+            if (_written && Bone != null && Bone.localRotation == _last) Bone.localRotation = _base;
+            _written = false;
+        }
+    }
+
     // ---- Per-instance randomness (keeps NPCs out of sync without touching UnityEngine.Random's sequence) ----
     private uint _rngState = 0x9E3779B9u;
     private float _noiseSeed;
@@ -273,6 +365,7 @@ public class NPCFace : MonoBehaviour
         _livePeak = 0.05f;
 
         ComputeEnvelope(clip);
+        StartProsody(clip, text);
 
         if (logEvents)
         {
@@ -344,6 +437,8 @@ public class NPCFace : MonoBehaviour
 
         SeedRandom();
         for (int m = 0; m < MouthCount; m++) _mouthChannel[m] = -1;
+        _gestures = new FaceGestures((uint)(NextRandom() * uint.MaxValue) | 1u);
+        _asymmetry = RandomRange(-0.12f, 0.12f);
     }
 
     private void OnEnable()
@@ -365,6 +460,7 @@ public class NPCFace : MonoBehaviour
         // Leave the face at its sculpted rest pose instead of frozen mid-blink or mid-word
         RestoreRestWeights();
         RestoreJawBone();
+        RestoreHeadAndEyes();
     }
 
     private void OnValidate()
@@ -396,11 +492,14 @@ public class NPCFace : MonoBehaviour
         UpdateSpeechState();
 
         UpdateExpression(now, thinking);
+        UpdateAmbient(now);
+        UpdateGestures(now, thinking);
         float blink = UpdateBlink(now);
         float jaw = UpdateMouth(now, talking);
 
         Compose(blink);
         ApplyJawBone(jaw);
+        ApplyHeadAndEyes();
     }
 
     // ================================================================
@@ -467,6 +566,7 @@ public class NPCFace : MonoBehaviour
         _exprFrom = new float[n];
         _exprTarget = new float[n];
         _exprState = new float[n];
+        _ambient = new float[n];
 
         for (int c = 0; c < n; c++)
         {
@@ -495,6 +595,11 @@ public class NPCFace : MonoBehaviour
         _blinkLowerR = Channel("eyeBlinkLowerRight");
 
         _jawBone = animator != null && animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Jaw) : null;
+        _neck.Bind(HumanBone(HumanBodyBones.Neck));
+        _head.Bind(HumanBone(HumanBodyBones.Head));
+        _eyeL.Bind(HumanBone(HumanBodyBones.LeftEye));
+        _eyeR.Bind(HumanBone(HumanBodyBones.RightEye));
+        BuildGestureShapes();
         _jawWritten = false;
         _hasJawClosed = TryFindClosedJaw(smr, out _jawClosed);
         if (_jawBone == null && jawBoneDegrees > 0f)
@@ -686,6 +791,41 @@ public class NPCFace : MonoBehaviour
             _emotionChannels[e] = channels.ToArray();
             _emotionWeights[e] = weights.ToArray();
         }
+
+        BuildAmbientMotion();
+    }
+
+    /// <summary>Resolves the library's idle capture to this face's channels (shapes it lacks are skipped).</summary>
+    private void BuildAmbientMotion()
+    {
+        _ambientChannels = null;
+        _ambientSamples = null;
+        _ambientCount = 0;
+        if (_ambient != null) System.Array.Clear(_ambient, 0, _ambient.Length);
+
+        FaceExpressionLibrary.MotionCycle cycle = library != null ? library.ambientMotion : null;
+        if (cycle == null || !cycle.IsUsable) return;
+
+        var channels = new List<int>(cycle.channels.Count);
+        var samples = new List<float[]>(cycle.channels.Count);
+        int count = int.MaxValue;
+        foreach (FaceExpressionLibrary.MotionChannel channel in cycle.channels)
+        {
+            if (channel == null || channel.samples == null || channel.samples.Length < 2) continue;
+            string key = StripPrefix(channel.shape);
+            int c = IsBodyShape(key) ? -1 : Channel(key);
+            if (c < 0 || channels.Contains(c)) continue;
+
+            channels.Add(c);
+            samples.Add(channel.samples);
+            count = Mathf.Min(count, channel.samples.Length);
+        }
+        if (channels.Count == 0) return;
+
+        _ambientChannels = channels.ToArray();
+        _ambientSamples = samples.ToArray();
+        _ambientCount = count;
+        _ambientRate = cycle.sampleRate;
     }
 
     /// <summary>Library first, then the built-in table. False when neither produced any bound shape.</summary>
@@ -844,6 +984,22 @@ public class NPCFace : MonoBehaviour
             _exprTarget[channels[i]] = weights[i] * strength;
     }
 
+    /// <summary>Samples the looping idle capture into _ambient (per-instance phase and speed).</summary>
+    private void UpdateAmbient(float now)
+    {
+        if (_ambientChannels == null) return;
+
+        float x = (now * _ambientSpeed + _ambientPhase) * _ambientRate % _ambientCount;
+        int i = Mathf.Clamp((int)x, 0, _ambientCount - 1);
+        int j = i + 1 < _ambientCount ? i + 1 : 0;
+        float f = x - i;
+        for (int k = 0; k < _ambientChannels.Length; k++)
+        {
+            float[] samples = _ambientSamples[k];
+            _ambient[_ambientChannels[k]] = Mathf.Lerp(samples[i], samples[j], f) * ambientMotion;
+        }
+    }
+
     // ================================================================
     // Layer 2: blinks
     // ================================================================
@@ -873,6 +1029,7 @@ public class NPCFace : MonoBehaviour
         if (p >= 1f)
         {
             _blinking = false;
+            _lastBlinkEnd = now;
             if (_doubleAfterThis)
             {
                 _secondBlinkQueued = true;
@@ -880,15 +1037,29 @@ public class NPCFace : MonoBehaviour
             }
             else
             {
-                _nextBlinkTime = now + RandomRange(blinkInterval.x, blinkInterval.y);
+                float interval = RandomRange(blinkInterval.x, blinkInterval.y);
+                _nextBlinkTime = now + (IsSpeakingAudio ? interval / SpeakingBlinkRate : interval);
             }
             return 0f;
         }
 
-        // Lids drop quickly and lift a little slower
-        return p < 0.4f
-            ? Mathf.SmoothStep(0f, 1f, p / 0.4f)
-            : 1f - Mathf.SmoothStep(0f, 1f, (p - 0.4f) / 0.6f);
+        // Lids drop fast, stay shut a moment, then lift with an easing-out opening (Trutoiu et al. 2011)
+        if (p < 0.35f)
+        {
+            float c = p / 0.35f;
+            return c * c;
+        }
+        if (p < 0.45f) return 1f;
+        float o = (p - 0.45f) / 0.55f;
+        return 1f - (1f - Mathf.Exp(-4f * o)) / (1f - Mathf.Exp(-4f));
+    }
+
+    /// <summary>Blinks now (a speech pause, a line's end, a big glance) unless the lids are busy or just blinked.</summary>
+    private void RequestBlink(float now)
+    {
+        if (_blinking || now - _lastBlinkEnd < BlinkRefractorySeconds) return;
+        _nextBlinkTime = now;
+        _secondBlinkQueued = false;
     }
 
     // ================================================================
@@ -913,6 +1084,7 @@ public class NPCFace : MonoBehaviour
 
         float tau;
         bool active;
+        bool babbling = false;
         if (speaking)
         {
             EvaluateSpeech();
@@ -921,6 +1093,12 @@ public class NPCFace : MonoBehaviour
         }
         else if (talking && !_stretchHadAudio && babbleAmount > 0f && now - _talkStart < BabbleLimit())
         {
+            babbling = true;
+            if (!_babbleGestures && speechGestures && _gestures != null)
+            {
+                _gestures.BeginBabble(CurrentEmotion());
+                _babbleGestures = true;
+            }
             EvaluateBabble(now);
             tau = BabbleMouthSmoothing;
             active = true;
@@ -929,6 +1107,12 @@ public class NPCFace : MonoBehaviour
         {
             tau = RestMouthSmoothing;
             active = false;
+        }
+
+        if (_babbleGestures && !babbling)
+        {
+            _babbleGestures = false;
+            if (!_gestureLine) _gestures.EndLine();
         }
 
         // Audio keeps playing while timeScale is 0, so the mouth follows unscaled time
@@ -971,6 +1155,8 @@ public class NPCFace : MonoBehaviour
 
     private void ClearSpeech()
     {
+        _prosodyTask = null;
+        _prosodyClip = null;
         _hasSpeech = false;
         _speechSource = null;
         _speechClip = null;
@@ -995,7 +1181,7 @@ public class NPCFace : MonoBehaviour
             float level = LoudnessAt(t) * (1f - cueMix);
             float drift = Mathf.PerlinNoise(_noiseSeed, t * 2.3f) * 2f - 1f;
             float stretch = level * 0.12f * Mathf.Max(0f, drift);
-            _mouthTarget[MJaw] += loudnessJaw * level * mouthAmplitude;
+            _mouthTarget[MJaw] += loudnessJaw * level * mouthAmplitude * (1f + EmphasisOpen * Emphasis());
             _mouthTarget[MStretchL] += stretch * mouthAmplitude;
             _mouthTarget[MStretchR] += stretch * mouthAmplitude;
             _mouthTarget[MFunnel] += level * 0.18f * Mathf.Max(0f, -drift) * mouthAmplitude;
@@ -1005,7 +1191,7 @@ public class NPCFace : MonoBehaviour
         {
             EvaluateCues(t + CueLeadSeconds, out int previous, out int current, out float blend);
             // Cues say which shape; loudness says how far open. Closing shapes (M/B/P press) keep full strength
-            float open = Mathf.Lerp(quietOpenFloor, 1f, LoudnessAt(t)) * mouthAmplitude;
+            float open = Mathf.Lerp(quietOpenFloor, 1f, LoudnessAt(t)) * mouthAmplitude * (1f + EmphasisOpen * Emphasis());
             for (int m = 0; m < MouthCount; m++)
             {
                 float pose = Mathf.Lerp(CuePoses[previous, m], CuePoses[current, m], blend);
@@ -1233,6 +1419,8 @@ public class NPCFace : MonoBehaviour
                 return;
             }
         }
+        // A word's first syllable follows the line start or a word gap
+        if (_babbleGestures && (_firstSyllable || _syllableIsGap)) _gestures.OnBabbleWord();
 
         _firstSyllable = false;
         _syllableIsGap = false;
@@ -1257,6 +1445,144 @@ public class NPCFace : MonoBehaviour
     }
 
     // ================================================================
+    // Layer 4: speech gestures
+    // ================================================================
+
+    /// <summary>
+    /// Copies the clip's samples here (main thread) and analyses its prosody on a worker; the gestures are planned
+    /// once the result is in (UpdateGestures), a few ms into the line.
+    /// </summary>
+    private void StartProsody(AudioClip clip, string text)
+    {
+        _speechText = text;
+        if (!speechGestures || _gestures == null) return;
+
+        int frames = clip.samples, channels = clip.channels, rate = clip.frequency;
+        if (frames <= 0 || channels <= 0 || rate <= 0 || clip.loadType == AudioClipLoadType.Streaming) return;
+
+        var data = new float[frames * channels];
+        try
+        {
+            if (!clip.GetData(data, 0)) return;
+        }
+        catch (System.Exception)
+        {
+            return;
+        }
+
+        _prosodyClip = clip;
+        _prosodyTask = Task.Run(() => SpeechProsody.Analyze(Downmix(data, channels), rate));
+    }
+
+    private static float[] Downmix(float[] data, int channels)
+    {
+        if (channels == 1) return data;
+        var mono = new float[data.Length / channels];
+        for (int i = 0; i < mono.Length; i++)
+        {
+            float sum = 0f;
+            for (int c = 0; c < channels; c++) sum += data[i * channels + c];
+            mono[i] = sum / channels;
+        }
+        return mono;
+    }
+
+    private void UpdateGestures(float now, bool thinking)
+    {
+        if (_gestures == null) return;
+
+        // The playing line's prosody is in: plan its brows, beats, blinks and glances
+        if (_prosodyTask != null && _prosodyTask.IsCompleted)
+        {
+            Task<ProsodyTrack> task = _prosodyTask;
+            _prosodyTask = null;
+            ProsodyTrack track = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
+            if (task.IsFaulted)
+                Debug.LogWarning($"[NPCFace] {name}: prosody analysis failed ({task.Exception?.GetBaseException().Message}).");
+
+            if (track != null && _hasSpeech && _prosodyClip == _speechClip)
+            {
+                _gestures.BeginLine(track, _speechText, CurrentEmotion(), SpeechTime());
+                _gestureLine = true;
+                _babbleGestures = false;
+                if (logEvents) Debug.Log($"[NPCFace] {name} gestures: {_gestures.PlanSummary}");
+            }
+        }
+        if (_gestureLine && !_hasSpeech)
+        {
+            _gestures.EndLine();
+            _gestureLine = false;
+        }
+
+        _gestures.Expressiveness = expressiveness;
+        _gestures.Update(Time.unscaledDeltaTime, Time.unscaledTime, IsSpeakingAudio ? SpeechTime() : -1f, thinking,
+            CurrentEmotion());
+        if (_gestures.ConsumeBlinkRequest()) RequestBlink(now);
+    }
+
+    /// <summary>
+    /// The emotion that styles the gestures: the transient line emotion when it's clear, else the base mood (a mild
+    /// cue, such as the faint surprise any question gets, shouldn't restyle the whole delivery).
+    /// </summary>
+    private FaceEmotion CurrentEmotion() =>
+        _transientActive && _transientIntensity >= MinStylingIntensity ? _transientEmotion : baseMood;
+
+    /// <summary>Playback time of the spoken clip (seconds), from its source's sample position.</summary>
+    private float SpeechTime()
+    {
+        if (_speechSource == null || _speechClip == null) return 0f;
+        return _speechClip.frequency > 0 ? _speechSource.timeSamples / (float)_speechClip.frequency : _speechSource.time;
+    }
+
+    private float Emphasis() => speechGestures && _gestures != null ? _gestures.Emphasis : 0f;
+
+    private void BuildGestureShapes()
+    {
+        // ARKit brow units: AU1+2 raise, AU4 knit, AU1+4 worry (Synty's sadness capture pairs inner-up with frown)
+        _raiseShapes = Shapes(("browInnerUp", 1f), ("browOuterUp", 0.75f));
+        _knitShapes = Shapes(("browInnerDown", 1f), ("browFrown", 0.35f), ("browOuterDown", 0.2f));
+        _worryShapes = Shapes(("browInnerUp", 1f), ("browFrown", 0.5f), ("browOuterDown", 0.3f));
+        _squintShapes = Shapes(("eyeSquint", 0.6f), ("cheekSquint", 0.8f));
+        _sneerShapes = Shapes(("noseSneer", 1f));
+        _wideShapes = Shapes(("eyeWideUpper", 1f));
+    }
+
+    /// <summary>Resolves (shape, weight) pairs to channels: the unsided shape, else its Left and Right sides.</summary>
+    private GestureShape[] Shapes(params (string shape, float weight)[] entries)
+    {
+        var list = new List<GestureShape>(entries.Length * 2);
+        foreach ((string shape, float weight) in entries)
+        {
+            int both = Channel(shape);
+            if (both >= 0)
+            {
+                list.Add(new GestureShape { Channel = both, Weight = weight, Side = 0 });
+                continue;
+            }
+            int left = Channel(shape + "Left"), right = Channel(shape + "Right");
+            if (left >= 0) list.Add(new GestureShape { Channel = left, Weight = weight, Side = -1 });
+            if (right >= 0) list.Add(new GestureShape { Channel = right, Weight = weight, Side = 1 });
+        }
+        return list.ToArray();
+    }
+
+    private void AddGesture(GestureShape[] shapes, float amount)
+    {
+        if (shapes == null || amount <= 0f) return;
+        for (int i = 0; i < shapes.Length; i++)
+        {
+            GestureShape g = shapes[i];
+            float side = g.Side < 0 ? 1f + _asymmetry : g.Side > 0 ? 1f - _asymmetry : 1f;
+            _add[g.Channel] += amount * g.Weight * side;
+        }
+    }
+
+    private Transform HumanBone(HumanBodyBones bone)
+    {
+        return animator != null && animator.isHuman ? animator.GetBoneTransform(bone) : null;
+    }
+
+    // ================================================================
     // Compose + write
     // ================================================================
 
@@ -1271,6 +1597,17 @@ public class NPCFace : MonoBehaviour
         {
             int c = _mouthChannel[m];
             if (c >= 0) _add[c] += _mouthState[m];
+        }
+
+        // Upper lids follow the eyes down a little, and widen a touch when they look up
+        if (eyeMotion && _gestures != null)
+        {
+            float down = Mathf.Clamp01(_gestures.GazePitch / 25f) * 0.35f;
+            if (down > 0f && blink < 1f)
+            {
+                if (_blinkUpperL >= 0) _add[_blinkUpperL] += down * (1f - blink);
+                if (_blinkUpperR >= 0) _add[_blinkUpperR] += down * (1f - blink);
+            }
         }
 
         if (blink > 0f)
@@ -1288,10 +1625,24 @@ public class NPCFace : MonoBehaviour
         for (int c = 0; c < n; c++)
         {
             float expr = _exprState[c];
+            float ambient = _ambient[c];
             if (_opensMouth[c]) expr *= 1f - _mouthActive;
             else if (_isMouthChannel[c]) expr *= lipScale;
             else if (_isEyeWide[c]) expr *= wideScale;
-            _add[c] += expr;
+            // Idle lip drift stops while the lips shape words
+            if (_isMouthChannel[c]) ambient *= 1f - _mouthActive;
+            else if (_isEyeWide[c]) ambient *= wideScale;
+            _add[c] += expr + ambient;
+        }
+
+        if (speechGestures && _gestures != null)
+        {
+            AddGesture(_raiseShapes, _gestures.BrowRaise);
+            AddGesture(_knitShapes, _gestures.BrowKnit);
+            AddGesture(_worryShapes, _gestures.BrowWorry);
+            AddGesture(_squintShapes, _gestures.Squint);
+            AddGesture(_sneerShapes, _gestures.Sneer);
+            AddGesture(_wideShapes, (_gestures.EyeWide + Mathf.Clamp01(-_gestures.GazePitch / 15f) * 0.12f) * wideScale);
         }
 
         // mouthClose is a corrective for an open jaw: past what the jaw opened, it pushes the lips into each other
@@ -1379,6 +1730,80 @@ public class NPCFace : MonoBehaviour
     }
 
     // ================================================================
+    // Layer 4b: head and eyes
+    // ================================================================
+
+    /// <summary>
+    /// Turns the neck and head by the gesture offsets (about the character's up, its right and its facing), then
+    /// sets the eyes back to the world direction the animation and look-at IK gave them (the vestibulo-ocular reflex)
+    /// and adds the gaze offset, so nods and posture shifts never drag the eyes off their target.
+    /// </summary>
+    private void ApplyHeadAndEyes()
+    {
+        bool moveHead = headMotion && _gestures != null && _head.Bone != null;
+        bool moveEyes = eyeMotion && _gestures != null && _eyeL.Bone != null && _eyeR.Bone != null;
+        if (!moveHead && !moveEyes)
+        {
+            RestoreHeadAndEyes();
+            return;
+        }
+
+        _neck.BeginFrame();
+        _head.BeginFrame();
+        _eyeL.BeginFrame();
+        _eyeR.BeginFrame();
+
+        Vector3 up = transform.up;
+        Vector3 facing = transform.forward;
+        if (_head.Bone != null && _eyeL.Bone != null && _eyeR.Bone != null)
+        {
+            Vector3 toEyes = (_eyeL.Bone.position + _eyeR.Bone.position) * 0.5f - _head.Bone.position;
+            Vector3 flat = Vector3.ProjectOnPlane(toEyes, up);
+            if (flat.sqrMagnitude > 1e-6f) facing = flat.normalized;
+        }
+        Vector3 right = Vector3.Cross(up, facing);
+
+        Quaternion eyeL = moveEyes ? _eyeL.Bone.rotation : Quaternion.identity;
+        Quaternion eyeR = moveEyes ? _eyeR.Bone.rotation : Quaternion.identity;
+
+        if (moveHead)
+        {
+            Quaternion delta = Quaternion.AngleAxis(_gestures.HeadYaw, up) *
+                               Quaternion.AngleAxis(_gestures.HeadPitch, right) *
+                               Quaternion.AngleAxis(_gestures.HeadRoll, facing);
+            if (_neck.Bone != null)
+            {
+                _neck.Bone.rotation = Quaternion.Slerp(Quaternion.identity, delta, NeckShare) * _neck.Bone.rotation;
+                _head.Bone.rotation = Quaternion.Slerp(Quaternion.identity, delta, 1f - NeckShare) * _head.Bone.rotation;
+            }
+            else
+            {
+                _head.Bone.rotation = delta * _head.Bone.rotation;
+            }
+        }
+
+        if (moveEyes)
+        {
+            Quaternion gaze = Quaternion.AngleAxis(_gestures.GazeYaw, up) * Quaternion.AngleAxis(_gestures.GazePitch, right);
+            _eyeL.Bone.rotation = gaze * eyeL;
+            _eyeR.Bone.rotation = gaze * eyeR;
+        }
+
+        _neck.EndFrame();
+        _head.EndFrame();
+        _eyeL.EndFrame();
+        _eyeR.EndFrame();
+    }
+
+    private void RestoreHeadAndEyes()
+    {
+        _eyeL.Restore();
+        _eyeR.Restore();
+        _head.Restore();
+        _neck.Restore();
+    }
+
+    // ================================================================
     // Animator flags
     // ================================================================
 
@@ -1428,6 +1853,8 @@ public class NPCFace : MonoBehaviour
         h ^= (uint)Random.Range(1, int.MaxValue);
         _rngState = h != 0u ? h : 0x9E3779B9u;
         _noiseSeed = NextRandom() * 1000f;
+        _ambientPhase = NextRandom() * 60f;
+        _ambientSpeed = RandomRange(0.85f, 1.1f);
     }
 
     /// <summary>xorshift32, uniform in [0, 1).</summary>

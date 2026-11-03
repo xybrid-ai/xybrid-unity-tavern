@@ -26,9 +26,9 @@ public enum FaceEmotion
 
 /// <summary>
 /// Per-emotion face blend shape weights, baked from the Synty face pose clips by
-/// <c>Tavern &gt; Bake Face Expression Library</c> (FaceExpressionBaker). Shape names are ARKit names
-/// without the "MESHBlends." prefix; weights are 0..1 offsets that <see cref="NPCFace"/> adds on top of
-/// each character's sculpted rest weights, so one library serves every NPC.
+/// <c>Tavern &gt; Bake Face Expression Library</c> (FaceExpressionBaker), plus a looping idle motion
+/// capture. Shape names are ARKit names without the "MESHBlends." prefix; weights are 0..1 offsets that
+/// <see cref="NPCFace"/> adds on top of each character's sculpted rest weights, so one library serves every NPC.
 /// </summary>
 [CreateAssetMenu(menuName = "Tavern/Face Expression Library", fileName = "FaceExpressions")]
 public class FaceExpressionLibrary : ScriptableObject
@@ -53,7 +53,46 @@ public class FaceExpressionLibrary : ScriptableObject
         public List<ShapeWeight> weights = new List<ShapeWeight>();
     }
 
+    /// <summary>One blend shape's samples within a <see cref="MotionCycle"/>.</summary>
+    [System.Serializable]
+    public class MotionChannel
+    {
+        [Tooltip("ARKit blend shape name without the 'MESHBlends.' prefix.")]
+        public string shape;
+        [Tooltip("Offsets 0..1 at the cycle's sample rate, starting at time 0.")]
+        public float[] samples;
+    }
+
+    /// <summary>
+    /// A looping capture of small face movements (brows, nose, cheeks, lips) baked from a Synty face
+    /// cycle clip. Blinks, gaze, jaw and tongue are left out: NPCFace drives those itself.
+    /// </summary>
+    [System.Serializable]
+    public class MotionCycle
+    {
+        [Tooltip("Animation clip this cycle was baked from (informational).")]
+        public string sourceClip;
+        [Tooltip("Samples per second of every channel.")]
+        public float sampleRate = 30f;
+        public List<MotionChannel> channels = new List<MotionChannel>();
+
+        /// <summary>True when the cycle holds at least one channel with two or more samples.</summary>
+        public bool IsUsable
+        {
+            get
+            {
+                if (channels == null || sampleRate <= 0f) return false;
+                for (int i = 0; i < channels.Count; i++)
+                    if (channels[i] != null && channels[i].samples != null && channels[i].samples.Length > 1) return true;
+                return false;
+            }
+        }
+    }
+
     public List<Expression> expressions = new List<Expression>();
+
+    [Tooltip("Idle face motion NPCFace loops on top of every expression (baked from A_Face_Neutral).")]
+    public MotionCycle ambientMotion = new MotionCycle();
 
     /// <summary>Finds the first expression for <paramref name="emotion"/>. False when the library has none.</summary>
     public bool TryGet(FaceEmotion emotion, out Expression expression)

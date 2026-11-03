@@ -14,6 +14,8 @@ using Object = UnityEngine.Object;
 /// prefix. Body-shape blends, tongue shapes and eye-gaze (eyeLook*) shapes are never baked.
 /// The asset is updated in place so its GUID (and every reference to it) survives a re-bake;
 /// hand-authored entries for emotions that have no clip (e.g. Thinking) are kept.
+/// The idle face cycle (A_Face_Neutral) is sampled at 30 Hz into the library's ambient motion, without
+/// its blinks, gaze, jaw, mouthClose and tongue (NPCFace drives those); a missing cycle keeps the old one.
 /// Synty packs are local-only dependencies: when the face pose folder is missing the bake just
 /// warns and returns null.
 /// </summary>
@@ -21,6 +23,9 @@ public static class FaceExpressionBaker
 {
     private const string DefaultAssetPath = "Assets/Revamp/FaceExpressions.asset";
     private const string FacePoseFolder = "Assets/Synty/SidekickCharacters/Animations/FacePoses";
+    private const string FaceCycleFolder = "Assets/Synty/SidekickCharacters/Animations/FaceCycles";
+    private const string AmbientCycleClip = "A_Face_Neutral";
+    private const float CycleSampleRate = 30f;      // Ambient motion samples per second
     private const string ClipPrefix = "A_FacePose_";
     private const string BlendShapePrefix = "blendShape.";
     private const string MeshBlendsPrefix = "MESHBlends.";
@@ -120,6 +125,10 @@ public static class FaceExpressionBaker
         List<FaceExpressionLibrary.Expression> kept = KeepUnbaked(library.expressions, bakedEmotions);
         library.expressions = Merge(baked, kept);
 
+        FaceExpressionLibrary.MotionCycle ambient = BakeAmbientCycle();
+        if (ambient != null)
+            library.ambientMotion = ambient;
+
         if (created)
             AssetDatabase.CreateAsset(library, assetPath);
 
@@ -193,6 +202,78 @@ public static class FaceExpressionBaker
             return byWeight != 0 ? byWeight : string.CompareOrdinal(a.shape, b.shape);
         });
         return expression;
+    }
+
+    /// <summary>
+    /// Samples the idle face cycle into a looping motion capture. Null (with a warning) when the clip is
+    /// missing or holds no usable channel.
+    /// </summary>
+    private static FaceExpressionLibrary.MotionCycle BakeAmbientCycle()
+    {
+        AnimationClip clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(FaceCycleFolder + "/" + AmbientCycleClip + ".anim");
+        if (clip == null || clip.length <= 0f)
+        {
+            Debug.LogWarning($"[FaceExpressionBaker] Face cycle '{AmbientCycleClip}' not found under {FaceCycleFolder}; " +
+                             "ambient motion left unchanged.");
+            return null;
+        }
+
+        // The last sample would repeat the first one (the clip loops), so the cycle stops one step short
+        int count = Mathf.Max(2, Mathf.RoundToInt(clip.length * CycleSampleRate));
+        var channels = new Dictionary<string, float[]>(StringComparer.Ordinal);
+
+        foreach (EditorCurveBinding binding in AnimationUtility.GetCurveBindings(clip))
+        {
+            string shape = ShapeName(binding.propertyName);
+            if (shape == null || IsExcluded(shape) || IsDrivenByFace(shape)) continue;
+
+            AnimationCurve curve = AnimationUtility.GetEditorCurve(clip, binding);
+            if (curve == null || curve.length == 0) continue;
+
+            var samples = new float[count];
+            float peak = 0f;
+            for (int i = 0; i < count; i++)
+            {
+                samples[i] = Mathf.Clamp01(curve.Evaluate(i / CycleSampleRate) / 100f);
+                peak = Mathf.Max(peak, samples[i]);
+            }
+            if (peak < MinWeight) continue;
+
+            // Several paths can bind one shape: keep the busier one
+            if (!channels.TryGetValue(shape, out float[] existing) || Peak(samples) > Peak(existing))
+                channels[shape] = samples;
+        }
+
+        if (channels.Count == 0)
+        {
+            Debug.LogWarning($"[FaceExpressionBaker] Face cycle '{clip.name}' has no usable channel; ambient motion left unchanged.");
+            return null;
+        }
+
+        var cycle = new FaceExpressionLibrary.MotionCycle { sourceClip = clip.name, sampleRate = CycleSampleRate };
+        var names = new List<string>(channels.Keys);
+        names.Sort(StringComparer.Ordinal);
+        foreach (string shape in names)
+            cycle.channels.Add(new FaceExpressionLibrary.MotionChannel { shape = shape, samples = channels[shape] });
+
+        Debug.Log($"[FaceExpressionBaker] Ambient motion <- {clip.name}: {cycle.channels.Count} shape(s), " +
+                  $"{count / CycleSampleRate:0.0}s at {CycleSampleRate:0} Hz");
+        return cycle;
+    }
+
+    /// <summary>Shapes NPCFace animates itself (blinks, the jaw, mouthClose): an idle capture must not move them.</summary>
+    private static bool IsDrivenByFace(string shape)
+    {
+        return shape.StartsWith("eyeBlink", StringComparison.Ordinal) ||
+               shape.StartsWith("jaw", StringComparison.Ordinal) ||
+               shape == "mouthClose";
+    }
+
+    private static float Peak(float[] samples)
+    {
+        float peak = 0f;
+        for (int i = 0; i < samples.Length; i++) peak = Mathf.Max(peak, samples[i]);
+        return peak;
     }
 
     /// <summary>

@@ -104,6 +104,9 @@ public class DialogueManagerV2 : MonoBehaviour
             _panelCanvasGroup = dialoguePanel.AddComponent<CanvasGroup>();
         _panelCanvasGroup.alpha = 0f;
 
+        // Lip sync's CLI copy is prepared while the models load, not on the first spoken line
+        RhubarbLipSync.Prewarm();
+
         // Initialize providers
         _scriptedProvider = new ScriptedDialogueProvider();
 
@@ -470,11 +473,13 @@ public class DialogueManagerV2 : MonoBehaviour
                 face.SetLipSyncCues(clip, spectralCues);
 
             if (!RhubarbLipSync.IsAvailable) return;
+            float analysisStart = Time.realtimeSinceStartup;
             LipSyncCue[] cues = await RhubarbLipSync.AnalyzeAsync(clip, text);
             // Stale session, failed analysis, or the clip was replaced/destroyed by a newer line
             if (session != _dialogueSession || cues == null || face == null || clip == null) return;
             face.SetLipSyncCues(clip, cues);
-            Debug.Log($"[DialogueManager] Lip sync for {face.name} from Rhubarb ({cues.Length} cues)");
+            Debug.Log($"[DialogueManager] Lip sync for {face.name} from Rhubarb ({cues.Length} cues, " +
+                      $"{(Time.realtimeSinceStartup - analysisStart) * 1000f:0} ms for a {clip.length:0.0}s line)");
         }
         catch (System.Exception ex)
         {
