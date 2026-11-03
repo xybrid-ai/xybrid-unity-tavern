@@ -1,0 +1,83 @@
+README.md
+  s_5502e4c590b55f::t_138923d1a8291c 1,3-4,6,20-24,26-27,29-31,34-37,39-41,43,45-48,50-51
+  s_5502e4c590b55f::t_9259deecf1d4df 8-15,17-18
+local-assets.json
+  s_5502e4c590b55f::t_138923d1a8291c 1-4,6-2166,2168,2170-2171,2235-2236,2238,2240-2241,2245-2246,2248,2250-2251,2255-2256,2258,2260-2261,2265-2266,2268,2270-2271,2275-2276,2278,2280-2281,2285-2286,2288,2290-2291,2295-2296,2298,2300-2301,2305-2306,2308,2310-2311,2315-2316,2318,2320-2497,2500-2569,2575-2576,2579-2580,2582,2584-2585,2606-9011,9014-9021,9024-9094,9098-9099,9103-9105
+  s_5502e4c590b55f::t_a3955a77bdc138 2167,2169,2172-2234,2237,2239,2242-2244,2247,2249,2252-2254,2257,2259,2262-2264,2267,2269,2272-2274,2277,2279,2282-2284,2287,2289,2292-2294,2297,2299,2302-2304,2307,2309,2312-2314,2317,2319,2498-2499,2570-2574,2577-2578,2581,2583,2586-2605,9095-9097,9100-9102
+  s_5502e4c590b55f::t_a9e7615289d87e 5,9012-9013,9022-9023
+Packages/packages-lock.json
+  s_5502e4c590b55f::t_505eafaf1f6e2f 4,6-7
+  s_5502e4c590b55f::t_1478dcfcd6212c 1-3,5,8-581
+Assets/Settings/Tavern_PostFX.asset
+  s_5502e4c590b55f::t_4ff82ca8346c8e 1-192,201,203-208,220,222-227
+  s_5502e4c590b55f::t_80d31e0d1ec435 193-195,198-200
+  s_5502e4c590b55f::t_339aad2eccc8a5 202
+  s_5502e4c590b55f::t_803256fe9a2dc2 209-211,217-219
+  s_5502e4c590b55f::t_52dd8a865c89d1 221
+  s_5502e4c590b55f::t_dfde183b18e62d 228-230
+  s_5502e4c590b55f::t_e1c35b0af30f63 196-197,212-216,231-246
+Assets/Settings/Tavern_PostFX.asset.meta
+  s_5502e4c590b55f::t_4ff82ca8346c8e 1-8
+ProjectSettings/ProjectSettings.asset
+  s_5502e4c590b55f::t_7ab8ceae23ccbd 1-830,832-945
+  s_5502e4c590b55f::t_812a2b6561dd9c 831
+Packages/manifest.json
+  s_5502e4c590b55f::t_2e77c6825032c4 3
+  h_92edd19a2533f1 1-2,8-9,20-34,36-38,40,42-58,68-69
+  s_5502e4c590b55f::t_a5259e8a3799d8 4-7,10-19,35,39,41,59-67
+Assets/Settings/PC_RPAsset.asset
+  s_e5bea986b158f0::t_a09480bb56ef9a 1-143
+Assets/Settings/Tavern_EveningSky.mat
+  s_5502e4c590b55f::t_6b2e22c6b7bcda 1-38
+Assets/Settings/Tavern_EveningSky.mat.meta
+  s_5502e4c590b55f::t_84398a5c083379 1-8
+ProjectSettings/EditorBuildSettings.asset
+  s_97b526bd397172::t_408a12919d8f3f 1-12
+ProjectSettings/GraphicsSettings.asset
+  s_e5bea986b158f0::t_a79fff944ae0bc 1-69
+ProjectSettings/Packages/com.unity.probuilder/Settings.json
+  s_97b526bd397172::t_cb5dfacb9bfda6 1-126
+ProjectSettings/UnityConnectSettings.asset
+  s_e5bea986b158f0::t_f1011d875479bb 1-40
+ProjectSettings/NavMeshAreas.asset
+  s_5502e4c590b55f::t_cb4ccb9b5dff31 1-93
+ProjectSettings/QualitySettings.asset
+  s_5502e4c590b55f::t_129296e023906e 1-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4146a844212505b39943f65e7e711496e87f5463",
+  "prompts": {},
+  "humans": {
+    "h_92edd19a2533f1": {
+      "author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_5502e4c590b55f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cea3b300-d521-4c3d-9d9a-f849f9a0378a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_97b526bd397172": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12eac-1812-74c2-9697-e52890ebf4fa",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_e5bea986b158f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a7f07d9e-36c4-4ec4-863d-0de7e557cfd1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
