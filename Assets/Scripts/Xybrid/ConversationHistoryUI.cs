@@ -53,7 +53,7 @@ namespace Tavern.Dialogue
 
                 var tmp = go.AddComponent<TextMeshProUGUI>();
                 tmp.fontSize = fontSize;
-                tmp.enableWordWrapping = true;
+                tmp.textWrappingMode = TextWrappingModes.Normal;
                 tmp.overflowMode = TextOverflowModes.Ellipsis;
                 tmp.text = "";
 

@@ -1,50 +1,77 @@
-# ============================================
-# Night Tavern - GitHub Distribution Setup
-# ============================================
-# This repo only tracks documentation files.
-# Unity project files are distributed via GitHub Releases.
-# Full project is managed in Unity Cloud.
-# ============================================
-
-# Ignore EVERYTHING by default
-*
-
-# ============================================
-# KEEP: Documentation files for GitHub
-# ============================================
-!.gitignore
-!README.md
-!LICENSE
-!CHANGELOG.md
-!RELEASING.md
-
-# Keep docs folder and its contents
-!docs/
-!docs/**
-
-# ============================================
-# Ignore build artifacts and local scripts
-# ============================================
-releases/
-scripts/
-
-# ============================================
-# Ignore system files even in kept folders
-# ============================================
+/*
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/RELEASING.md
+!/LICENSE
+!/CHANGELOG.md
+!/docs/
+!/Assets/
+!/Packages/
+!/ProjectSettings/
+!/tools/
+!/local-assets.json
+!/.github/
+# Track reviewed project source; art and generated content stay local.
+/Assets/*
+!/Assets/Scripts/
+!/Assets/Scripts.meta
+!/Assets/Resources/
+/Assets/Resources/*
+!/Assets/Resources/NPCPrompts/
+!/Assets/Resources/NPCPrompts.meta
+!/Assets/Settings/
+!/Assets/Settings.meta
+!/Assets/Scenes/
+/Assets/Scenes/*
+!/Assets/Scenes/SampleScene.unity
+!/Assets/Scenes/SampleScene.unity.meta
+!/Assets/Scenes/tts-demo.unity
+!/Assets/Scenes/tts-demo.unity.meta
+# demo_xybrid.unity embeds imported meshes; retain it locally until refactored.
+/releases/
+/scripts/release.sh
+# Unity generated output
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild*/
+/[Ll]ogs/
+/UserSettings/
+/.context/
+/.vs/
 .DS_Store
-Thumbs.db
 *.log
+*.csproj
+*.sln
+*.slnx
+*.user
+*.unitypackage*
+*.gguf*
+*.xyb*
+*.onnx*
+*.dylib*
+*.dll*
+*.so*
+*.app/
+*.zip
+*.wav*
+*.png*
+*.jpg*
+*.fbx*
+*.ttf*
 
-# Keep Scripts folder and its contents
-!Assets/
-!Assets/Scripts/
-!Assets/Scripts/**
-!Assets/Resources/NPCPrompts/**
+.env*
+.mcp.json
+.vscode/
+.plastic/
+Recordings/
+mono_crash.*
+*.sk
 
-# Xybrid files
-*.xyb
-
-# Manigest for references
-!Packages/manifest.json
-!Packages/packages-lock.json
-Assets/Scripts/.DS_Store
+.env*
+.mcp.json
+.vscode/
+.plastic/
+Recordings/
+mono_crash.*

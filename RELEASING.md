@@ -1,19 +1,14 @@
-# Releasing
+# Source distribution
 
-## Creating a New Release
+Distribute reviewed source with instructions for local licensed asset imports.
+Run `python3 tools/check_repository.py` before publishing source.
 
-1. Run the release script with a version number:
-   ```bash
-   ./scripts/release.sh v0.1.0-alpha3
-   ```
+Do not run the legacy full-project release ZIP script or upload full `Assets/`
+archives, paid pack files, embedded art meshes, models or native tool bundles.
+The old `scripts/release.sh` is superseded by this policy and remains local.
 
-2. This creates a zip in `releases/` containing the full Unity project
+Existing release ZIPs require an explicit content audit and, if needed, separate
+authorized removal. They have not been inspected or removed by this split.
 
-3. Create a GitHub release and upload the zip:
-   ```bash
-   git tag v0.1.0-alpha3 && git push origin v0.1.0-alpha3
-   gh release create v0.1.0-alpha3 releases/Night-Tavern-v0.1.0-alpha3.zip \
-     --repo xybrid-ai/xybrid-unity-tavern \
-     --title "Night-Tavern v0.1.0-alpha3" \
-     --notes "Alpha 3 release of Night Tavern demo."
-   ```
+Player releases are separate from source distribution and require the relevant
+asset/model licenses to be checked. No player build is part of this migration.

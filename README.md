@@ -1,73 +1,51 @@
-# Night Tavern - Xybrid Unity Example
+# NPC Tavern — Xybrid Unity Example
 
-A full RPG example project demonstrating Xybrid SDK integration with Unity. Features immersive NPC dialogue powered by AI and text-to-speech audio for dynamic character interactions.
+The multi-NPC Tavern remains its own project. The standalone gatekeeper/orc
+encounter is maintained separately at https://github.com/xybrid-ai/orc-demo.
 
-![Xybrid Tavern Demo](https://raw.githubusercontent.com/xybrid-ai/xybrid/master/docs/game-demo.gif)
+## Source and local assets
 
-*Talk to NPCs like Greta the barkeeper — each character responds dynamically using on-device AI.*
+Use **Unity 6000.6.4f1** and the **Xybrid Unity SDK 0.16.0**. For now
+`Packages/manifest.json` references a local checkout of the SDK
+(`~/Developer/Github/xybrid-sdk/bindings/unity`), so other machines must
+check the SDK out at that path or change the reference. NPC voices use Gradium
+Phonon through the SDK's tts-zzz backend, which no released native ships yet:
+`Assets/Xybrid/Plugins/macOS/libxybrid_bolt.dylib` is a local build, and
+`Assets/Xybrid/Plugins/.xybrid-native-macos-version` must match the SDK
+package version or the SDK replaces it with a stock native.
 
-## Download
+Git tracks reviewed Tavern scripts, NPC prompts, render settings, package
+definitions and project settings. No Git LFS is used.
 
-Get the latest release from [GitHub Releases](https://github.com/xybrid-ai/xybrid-unity-tavern/releases).
+Purchased art, models, installed native tools and generated caches stay local.
+This includes Synty packs and imported art outside `Assets/Synty`. The existing
+`Assets/Scenes/demo_xybrid.unity` also stays local: it contains embedded meshes
+and must be converted to asset references before it can be distributed as source.
+Ignoring the original pack folder alone does not remove those meshes.
 
-Each release includes a complete Unity project zip ready to import.
+For an existing licensed project, keep using the local scenes. For another
+checkout, restore manifest-listed local dependencies from your licensed copy:
 
-## Requirements
-
-- **Unity 2022.3 LTS** (or later)
-- **Xybrid SDK** - [Get it here](https://github.com/xybrid-ai/xybrid)
-
-## Installation
-
-### 1. Download the project
-
-Download the latest release zip from [GitHub Releases](https://github.com/xybrid-ai/xybrid-unity-tavern/releases) and extract it to your Unity projects folder.
-
-### 2. Open in Unity
-
-Open Unity Hub, click **Add**, and select the extracted project folder. Open it with Unity 2022.3 LTS or later.
-
-### 3. Install the Xybrid SDK
-
-If the Xybrid SDK package is not already included in the project:
-
-1. Download the SDK from [github.com/xybrid-ai/xybrid](https://github.com/xybrid-ai/xybrid)
-2. In Unity, go to **Assets > Import Package > Custom Package**
-3. Select the downloaded Xybrid SDK package and import all assets
-
-### 4. Open the scene and play
-
-1. In the Project panel, navigate to `Assets/Scenes/`
-2. Open the `Tavern` scene
-3. Press **Play** to start interacting with NPCs
-
-## Features
-
-- **AI-Powered NPC Dialogue** - Dynamic conversations that respond intelligently to player input
-- **Text-to-Speech Audio** - Characters speak with synthesized voices for immersive interactions
-- **RPG Tavern Setting** - Atmospheric medieval tavern environment
-- **Multiple NPCs** - Interact with various characters, each with unique personalities
-
-## Project Structure
-
-```
-Assets/
-├── Scenes/          # Game scenes
-├── Scripts/         # C# scripts for NPC and dialogue systems
-├── Audio/           # TTS audio files and sound effects
-├── Prefabs/         # Character and environment prefabs
-└── Materials/       # Visual materials and textures
+```sh
+python3 tools/local_assets.py --from-project "/path/to/licensed/Tavern"
+python3 tools/local_assets.py
 ```
 
-## Documentation
+The manifest records exact paths and importer metadata; it does not grant a
+license or download paid packs. A stock pack import may not restore customized
+assets or the embedded Tavern scene. A fresh checkout therefore requires a
+licensed working-project copy until a reference-only scene recipe is provided.
 
-See the [docs/](docs/) folder for additional documentation.
+The original local orc files remain in this working project for continuity;
+new orc work belongs in the standalone repository. Tavern files and the
+standalone project's files are independent.
 
-## Related
+## Distribution
 
-- [Xybrid SDK](https://github.com/xybrid-ai/xybrid) - Main Xybrid repository
-- [Xybrid Documentation](https://github.com/xybrid-ai/xybrid#readme) - SDK documentation and guides
+Run `python3 tools/check_repository.py` before committing source. Do not publish
+full Unity project ZIPs or raw paid assets. Previous full-project release ZIPs
+are legacy artifacts and need a separate content audit; this change does not
+remove or certify them. See `RELEASING.md` for the current policy.
 
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+The repository license covers project-owned code, not purchased art, third-party
+models, voice data or other local dependencies.
