@@ -84,6 +84,7 @@ public class DialogueManagerV2 : MonoBehaviour
     private bool _isProcessing;
     private bool _isDialogueOpen;
     private int _dialogueSession;   // Bumped on start/end so late async continuations can tell they're stale
+    private int _talkingLine;       // Bumped whenever an NPC line starts its talking animation
 
     /// <summary>False while the provider is still loading or another dialogue is open/processing.</summary>
     public bool CanStartDialogue => _provider != null && !_isProcessing && !_isDialogueOpen;
@@ -455,6 +456,7 @@ public class DialogueManagerV2 : MonoBehaviour
             _ttsPlayer.SetSpeaker(npc != null ? npc.transform : null);
             AudioClip clip = _ttsPlayer.PlayPCM(pcm);
             if (clip == null || npc == null) return;
+            _ = StopTalkingWhenVoiceEndsAsync(npc, clip, session, _talkingLine);
 
             // Explicit null checks rather than ?. : a destroyed face must not be called
             NPCFace face = npc.GetComponentInChildren<NPCFace>();
@@ -478,6 +480,22 @@ public class DialogueManagerV2 : MonoBehaviour
         {
             Debug.LogWarning($"[DialogueManager] TTS failed (non-fatal): {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Ends the talking body animation once <paramref name="npc"/>'s voiced line has played out, unless the dialogue
+    /// closed or a newer line has started talking in the meantime.
+    /// </summary>
+    private async Task StopTalkingWhenVoiceEndsAsync(NPCIdentity npc, AudioClip clip, int session, int talkingLine)
+    {
+        AudioSource source = _ttsPlayer != null ? _ttsPlayer.Source : null;
+        while (source != null && clip != null && source.clip == clip && source.isPlaying && session == _dialogueSession)
+            await Task.Delay(100);
+
+        if (session != _dialogueSession || talkingLine != _talkingLine || npc == null) return;
+        var animator = npc.GetComponentInChildren<Animator>();
+        if (animator != null)
+            animator.SetBool("isTalking", false);
     }
 
     /// <summary>
@@ -564,6 +582,7 @@ public class DialogueManagerV2 : MonoBehaviour
                         var animator = _currentNPC.GetComponentInChildren<Animator>();
                         if (animator != null)
                             animator.SetBool("isTalking", true);
+                        _talkingLine++;
                     }
                 }
 
@@ -652,6 +671,7 @@ public class DialogueManagerV2 : MonoBehaviour
             var animator = _currentNPC.GetComponentInChildren<Animator>();
             if (animator != null)
                 animator.SetBool("isTalking", true);
+            _talkingLine++;
         }
 
         _typewriterCoroutine = StartCoroutine(TypewriterEffect(text));

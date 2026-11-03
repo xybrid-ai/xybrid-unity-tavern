@@ -19,7 +19,8 @@ public struct LipSyncCue
 /// (1) expression: the base mood, replaced by a transient emotion (<see cref="ShowEmotion"/>) or the
 /// Thinking face while the Animator's isThinking is on; (2) natural blinks; (3) mouth: TTS audio given to
 /// <see cref="Speak"/> (Rhubarb cues once they arrive, the clip's loudness until then), procedural babble
-/// while isTalking is on without audio (table chatter), otherwise rest; (4) an optional jaw bone rotation.
+/// while isTalking is on without audio (table chatter), otherwise rest; (4) the jaw bone, held at its closed
+/// bind pose (clips without a jaw curve leave a humanoid jaw open) plus an optional opening with the mouth.
 /// Body-shape blend shapes (defaultHeavy, defaultBuff, defaultSkinny, masculineFeminine) are never written.
 /// Attach to the NPC root, next to the Animator.
 /// </summary>
@@ -38,34 +39,40 @@ public class NPCFace : MonoBehaviour
 
     // Mouth shapes driven by the lip-sync layer (columns of CuePoses)
     private const int MJaw = 0, MClose = 1, MPressL = 2, MPressR = 3, MStretchL = 4, MStretchR = 5, MFunnel = 6,
-                      MPucker = 7, MRollLower = 8, MUpperUpL = 9, MUpperUpR = 10, MTongueUp = 11, MTongueOut = 12,
-                      MouthCount = 13;
+                      MPucker = 7, MRollLower = 8, MRollUpper = 9, MLowerDownL = 10, MLowerDownR = 11,
+                      MUpperUpL = 12, MUpperUpR = 13, MTongueUp = 14, MTongueOut = 15, MouthCount = 16;
     private static readonly string[] MouthShapeNames =
     {
         "jawOpen", "mouthClose", "mouthPressLeft", "mouthPressRight", "mouthStretchLeft", "mouthStretchRight",
-        "mouthFunnel", "mouthPucker", "mouthRollLower", "mouthUpperUpLeft", "mouthUpperUpRight", "tongueUp", "tongueOut"
+        "mouthFunnel", "mouthPucker", "mouthRollLower", "mouthRollUpper", "mouthLowerDownLeft", "mouthLowerDownRight",
+        "mouthUpperUpLeft", "mouthUpperUpRight", "tongueUp", "tongueOut"
     };
 
     // Rhubarb cue rows: A..H, then X (rest)
     private const int CueA = 0, CueB = 1, CueC = 2, CueD = 3, CueE = 4, CueF = 5, CueX = 8, CueCount = 9;
 
-    // Mouth pose per Rhubarb cue, 0..1 (ported from XybridAvatarPlayer.Pose; rounded E/F softened for the
-    // human Sidekick faces, where the troll's 0.8 pucker read as a kiss)
+    // Mouth pose per Rhubarb cue, 0..1, after Rhubarb's shape guide and JALI (jaw and lips move separately).
+    // Lips meet by pressing (A; G adds a raised upper lip so the upper teeth show over the lower one), never by
+    // mouthClose alone: on the Sidekick rig that corrective only makes sense against an open jaw (Compose caps it
+    // to one). mouthRollLower is left out: it folds a second dark crease under the lower lip.
+    // B keeps the teeth together with the lips parted; rounded E/F stay soft (a 0.8 pucker read as a kiss).
     private static readonly float[,] CuePoses =
     {
-        //  jaw   close pressL pressR strL  strR  funnel pucker rollLo upL   upR   tUp   tOut
-        { 0f,    .8f,  .35f,  .35f,  0f,   0f,   0f,    0f,    0f,    0f,   0f,   0f,   0f   }, // A  closed (M, B, P)
-        { .13f,  0f,   0f,    0f,    .18f, .18f, 0f,    0f,    0f,    0f,   0f,   0f,   0f   }, // B  slightly open (K, S, T)
-        { .36f,  0f,   0f,    0f,    .22f, .22f, 0f,    0f,    0f,    0f,   0f,   0f,   0f   }, // C  open (EH, AE)
-        { .66f,  0f,   0f,    0f,    0f,   0f,   0f,    0f,    0f,    0f,   0f,   0f,   0f   }, // D  wide open (AA)
-        { .31f,  0f,   0f,    0f,    0f,   0f,   .45f,  .12f,  0f,    0f,   0f,   0f,   0f   }, // E  rounded (AO, ER)
-        { .17f,  0f,   0f,    0f,    0f,   0f,   .2f,   .5f,   0f,    0f,   0f,   0f,   0f   }, // F  puckered (UW, OW, W)
-        { .06f,  0f,   0f,    0f,    0f,   0f,   0f,    0f,    .5f,   .22f, .22f, 0f,   0f   }, // G  teeth on lip (F, V)
-        { .22f,  0f,   0f,    0f,    0f,   0f,   0f,    0f,    0f,    0f,   0f,   .42f, .15f }, // H  tongue up (L)
-        { 0f,    0f,   0f,    0f,    0f,   0f,   0f,    0f,    0f,    0f,   0f,   0f,   0f   }, // X  rest
+        //  jaw   close pressL pressR strL  strR  funnel pucker rollLo rollUp lowL  lowR  upL   upR   tUp   tOut
+        { 0f,    0f,   .45f,  .45f,  0f,   0f,   0f,    0f,    0f,    .05f,  0f,   0f,   0f,   0f,   0f,   0f   }, // A  closed (M, B, P)
+        { .08f,  0f,   0f,    0f,    .25f, .25f, 0f,    0f,    0f,    0f,    .35f, .35f, .2f,  .2f,  0f,   0f   }, // B  teeth together (K, S, T, EE)
+        { .36f,  0f,   0f,    0f,    .25f, .25f, 0f,    0f,    0f,    0f,    .25f, .25f, .08f, .08f, 0f,   0f   }, // C  open (EH, AE)
+        { .66f,  0f,   0f,    0f,    .08f, .08f, 0f,    0f,    0f,    0f,    .25f, .25f, .08f, .08f, 0f,   0f   }, // D  wide open (AA)
+        { .3f,   0f,   0f,    0f,    0f,   0f,   .45f,  .12f,  0f,    0f,    .1f,  .1f,  0f,   0f,   0f,   0f   }, // E  rounded (AO, ER)
+        { .14f,  .3f,  0f,    0f,    0f,   0f,   .22f,  .5f,   0f,    0f,    0f,   0f,   0f,   0f,   0f,   0f   }, // F  puckered (UW, OW, W)
+        { .06f,  0f,   .2f,   .2f,   0f,   0f,   0f,    0f,    0f,    0f,    0f,   0f,   .4f,  .4f,  0f,   0f   }, // G  teeth on lip (F, V)
+        { .3f,   0f,   0f,    0f,    0f,   0f,   0f,    0f,    0f,    0f,    .15f, .15f, 0f,   0f,   .45f, .12f }, // H  tongue up (L)
+        { 0f,    0f,   0f,    0f,    0f,   0f,   0f,    0f,    0f,    0f,    0f,   0f,   0f,   0f,   0f,   0f   }, // X  rest
     };
 
-    private const float RestingMouthOpenScale = 0.15f;   // Base mood: keep only a hint of lip-parting shapes
+    private const float RestingMouthOpenScale = 0.15f;   // Expressions: keep only a hint of lip-parting shapes
+    private const float MouthCloseCancelsJaw = 0.37f;    // Sidekick: 1.0 mouthClose seals the lips over 0.37 jawOpen
+    private const float CueLeadSeconds = 0.03f;          // Mouths shape a sound slightly before it is heard
     private const float CueBlendSeconds = 0.04f;         // Between consecutive Rhubarb cues
     private const float CueArrivalBlendSeconds = 0.15f;  // Loudness jaw -> cue poses once cues arrive
     private const float EnvelopeHop = 0.01f;             // Loudness envelope resolution (seconds)
@@ -125,8 +132,12 @@ public class NPCFace : MonoBehaviour
     [Tooltip("Expression mouth/jaw/cheekPuff shapes are scaled by this while the mouth moves, so lip shapes stay readable.")]
     [SerializeField, Range(0f, 1f)] private float speakingExpressionMouth = 0.4f;
 
-    [Header("Jaw Bone (optional)")]
-    [Tooltip("Degrees the humanoid Jaw bone opens at full jawOpen, about its local X axis, on top of the animation. 0 = off.")]
+    [Header("Jaw Bone")]
+    [Tooltip("Hold the humanoid Jaw bone at the avatar's closed bind pose every frame. Clips without a jaw curve " +
+             "(the Mixamo ones) otherwise leave a Sidekick jaw about 10° open, so the lips never meet.")]
+    [SerializeField] private bool holdJawClosed = true;
+    [Tooltip("Degrees the humanoid Jaw bone opens at full jawOpen, about its local X axis (from the closed pose, " +
+             "or on top of the animation when Hold Jaw Closed is off). 0 = off.")]
     [SerializeField] private float jawBoneDegrees = 0f;
 
     [Header("Debug")]
@@ -143,7 +154,7 @@ public class NPCFace : MonoBehaviour
     private float[] _rest;          // Rest weight (0..100) captured at bind
     private float[] _written;       // Last weight written, to skip unchanged writes
     private bool[] _isMouthChannel; // mouth*, jaw*, cheekPuff*: scaled while the mouth layer is active
-    private bool[] _opensMouth;     // Shapes that part the lips: damped in the resting mood (a held grin reads as mid-sentence)
+    private bool[] _opensMouth;     // Shapes that part the lips: damped in expressions (a held grin reads as mid-sentence)
     private bool[] _isEyeWide;      // eyeWide*: suppressed while blinking
     private float[] _add;           // Blink + mouth offsets of the current frame
     private readonly Dictionary<string, int> _channelByName = new Dictionary<string, int>(System.StringComparer.Ordinal);
@@ -217,6 +228,8 @@ public class NPCFace : MonoBehaviour
     private float _syllableAmp;
 
     // ---- Jaw bone ----
+    private bool _hasJawClosed;
+    private Quaternion _jawClosed;  // Local rotation of the closed jaw (bind pose)
     private bool _jawWritten;
     private Quaternion _jawBase;
     private Quaternion _jawLastWritten;
@@ -280,8 +293,9 @@ public class NPCFace : MonoBehaviour
         LipSyncCue[] clean = SanitizeCues(cues);
         if (clean == null) return;
 
+        // Only the first cues of a line fade in from the loudness jaw; a refinement (spectral -> Rhubarb) swaps in place
+        if (_cues == null) _cuesArrivedAt = Time.unscaledTime;
         _cues = clean;
-        _cuesArrivedAt = Time.unscaledTime;
 
         if (logEvents)
             Debug.Log($"[NPCFace] {name} received {clean.Length} lip-sync cues");
@@ -482,6 +496,7 @@ public class NPCFace : MonoBehaviour
 
         _jawBone = animator != null && animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Jaw) : null;
         _jawWritten = false;
+        _hasJawClosed = TryFindClosedJaw(smr, out _jawClosed);
         if (_jawBone == null && jawBoneDegrees > 0f)
             Debug.LogWarning($"[NPCFace] {name}: jawBoneDegrees is set but the avatar has no Jaw bone.");
 
@@ -773,12 +788,10 @@ public class NPCFace : MonoBehaviour
         }
 
         FillTarget(emotion, strength);
-        if (kind == ExprKind.Base)
-        {
-            // A resting mood keeps smiles, brows and eyes but not an open mouth; reactions may still open it
-            for (int c = 0; c < _channelCount; c++)
-                if (_opensMouth[c]) _exprTarget[c] *= RestingMouthOpenScale;
-        }
+        // Moods and line emotions keep smiles, brows and eyes but only a hint of an open mouth: the lips part for
+        // words, and a reaction held after the line ends would otherwise leave the mouth hanging open
+        for (int c = 0; c < _channelCount; c++)
+            if (_opensMouth[c]) _exprTarget[c] *= RestingMouthOpenScale;
         int n = _channelCount;
 
         if (!_exprStarted)
@@ -990,7 +1003,7 @@ public class NPCFace : MonoBehaviour
 
         if (cueMix > 0f)
         {
-            EvaluateCues(t, out int previous, out int current, out float blend);
+            EvaluateCues(t + CueLeadSeconds, out int previous, out int current, out float blend);
             // Cues say which shape; loudness says how far open. Closing shapes (M/B/P press) keep full strength
             float open = Mathf.Lerp(quietOpenFloor, 1f, LoudnessAt(t)) * mouthAmplitude;
             for (int m = 0; m < MouthCount; m++)
@@ -1001,9 +1014,11 @@ public class NPCFace : MonoBehaviour
         }
     }
 
+    /// <summary>Lip contact shapes (press, roll, close): kept at full strength, unlike the opening ones.</summary>
     private static bool IsClosingShape(int mouthShape)
     {
-        return mouthShape == MClose || mouthShape == MPressL || mouthShape == MPressR;
+        return mouthShape == MClose || mouthShape == MPressL || mouthShape == MPressR ||
+               mouthShape == MRollLower || mouthShape == MRollUpper;
     }
 
     /// <summary>The cue at time t and the one before it, with a 40 ms blend between them (ported from XybridAvatarPlayer).</summary>
@@ -1196,8 +1211,8 @@ public class NPCFace : MonoBehaviour
 
         float p = Mathf.Clamp01((now - _syllableStart) / _syllableLength);
         float open = Mathf.Sin(p * Mathf.PI);
-        // Lips stay a little parted between syllables of a word; a closed (A) syllable presses fully
-        if (_syllableShape != CueA) open = 0.2f + 0.8f * open;
+        // Lips stay barely parted between syllables of a word; a closed (A) syllable presses fully
+        if (_syllableShape != CueA) open = 0.08f + 0.92f * open;
 
         float amount = open * _syllableAmp * babbleAmount * fade;
         for (int m = 0; m < MouthCount; m++)
@@ -1233,10 +1248,10 @@ public class NPCFace : MonoBehaviour
     private int PickBabbleShape()
     {
         float r = NextRandom();
-        if (r < 0.10f) return CueA;
-        if (r < 0.32f) return CueB;
-        if (r < 0.58f) return CueC;
-        if (r < 0.74f) return CueD;
+        if (r < 0.18f) return CueA;
+        if (r < 0.38f) return CueB;
+        if (r < 0.60f) return CueC;
+        if (r < 0.75f) return CueD;
         if (r < 0.88f) return CueE;
         return CueF;
     }
@@ -1266,17 +1281,30 @@ public class NPCFace : MonoBehaviour
             if (_blinkLowerR >= 0) _add[_blinkLowerR] += blink * 0.3f;
         }
 
-        // Lip safety: the expression's mouth gives way while the lips are shaping words
+        // Lip safety: the expression's mouth gives way while the lips are shaping words, and only the words open it
         float lipScale = Mathf.Lerp(1f, speakingExpressionMouth, _mouthActive);
         float wideScale = 1f - blink;
 
         for (int c = 0; c < n; c++)
         {
             float expr = _exprState[c];
-            if (_isMouthChannel[c]) expr *= lipScale;
+            if (_opensMouth[c]) expr *= 1f - _mouthActive;
+            else if (_isMouthChannel[c]) expr *= lipScale;
             else if (_isEyeWide[c]) expr *= wideScale;
+            _add[c] += expr;
+        }
 
-            float offset = expr + _add[c];
+        // mouthClose is a corrective for an open jaw: past what the jaw opened, it pushes the lips into each other
+        int jawChannel = _mouthChannel[MJaw], closeChannel = _mouthChannel[MClose];
+        if (closeChannel >= 0 && _add[closeChannel] > 0f)
+        {
+            float jawOpen = jawChannel >= 0 ? Mathf.Max(0f, _add[jawChannel]) : 0f;
+            _add[closeChannel] = Mathf.Min(_add[closeChannel], jawOpen / MouthCloseCancelsJaw);
+        }
+
+        for (int c = 0; c < n; c++)
+        {
+            float offset = _add[c];
             // Untouched shapes keep their exact rest weight (never clamped or rewritten)
             float value = offset == 0f ? _rest[c] : Mathf.Clamp(_rest[c] + offset * 100f, 0f, 100f);
             if (Mathf.Abs(value - _written[c]) <= 0.01f) continue;
@@ -1287,13 +1315,14 @@ public class NPCFace : MonoBehaviour
     }
 
     // ================================================================
-    // Layer 4: jaw bone (optional)
+    // Layer 4: jaw bone
     // ================================================================
 
     private void ApplyJawBone(float jaw)
     {
         if (_jawBone == null) return;
-        if (jawBoneDegrees <= 0f)
+        bool hold = holdJawClosed && _hasJawClosed;
+        if (!hold && jawBoneDegrees <= 0f)
         {
             RestoreJawBone();
             return;
@@ -1304,9 +1333,41 @@ public class NPCFace : MonoBehaviour
         if (_jawWritten && animated == _jawLastWritten) animated = _jawBase;
 
         _jawBase = animated;
-        _jawLastWritten = animated * Quaternion.AngleAxis(Mathf.Clamp01(jaw) * jawBoneDegrees, Vector3.right);
+        Quaternion from = hold ? _jawClosed : animated;
+        _jawLastWritten = from * Quaternion.AngleAxis(Mathf.Clamp01(jaw) * jawBoneDegrees, Vector3.right);
         _jawBone.localRotation = _jawLastWritten;
         _jawWritten = true;
+    }
+
+    /// <summary>
+    /// The jaw bone's closed local rotation: its rest rotation in the avatar's skeleton, or failing that the one
+    /// the face mesh was bound with.
+    /// </summary>
+    private bool TryFindClosedJaw(SkinnedMeshRenderer smr, out Quaternion closed)
+    {
+        closed = Quaternion.identity;
+        if (_jawBone == null) return false;
+
+        Avatar avatar = animator != null ? animator.avatar : null;
+        if (avatar != null)
+        {
+            foreach (SkeletonBone bone in avatar.humanDescription.skeleton)
+            {
+                if (bone.name != _jawBone.name) continue;
+                closed = bone.rotation;
+                return true;
+            }
+        }
+
+        Transform[] bones = smr != null ? smr.bones : null;
+        Matrix4x4[] bindposes = smr != null && smr.sharedMesh != null ? smr.sharedMesh.bindposes : null;
+        if (bones == null || bindposes == null) return false;
+        int jaw = System.Array.IndexOf(bones, _jawBone);
+        int parent = System.Array.IndexOf(bones, _jawBone.parent);
+        if (jaw < 0 || parent < 0 || jaw >= bindposes.Length || parent >= bindposes.Length) return false;
+
+        closed = (bindposes[parent] * bindposes[jaw].inverse).rotation;
+        return true;
     }
 
     private void RestoreJawBone()
