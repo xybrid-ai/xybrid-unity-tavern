@@ -75,3 +75,7 @@ mono_crash.*
 .plastic/
 Recordings/
 mono_crash.*
+
+# Audio2Face dev bridge: local Python environment (model files live outside the repo)
+/tools/audio2face/.venv/
+__pycache__/

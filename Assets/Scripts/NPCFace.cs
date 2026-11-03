@@ -15,12 +15,33 @@ public struct LipSyncCue
 }
 
 /// <summary>
+/// Per-frame blend shape weights for one spoken clip (e.g. from Audio2Face), sampled at <see cref="Fps"/> from the
+/// clip's start: <see cref="Weights"/>[frame * Names.Length + shape], 0..1, names without the "MESHBlends." prefix.
+/// </summary>
+public sealed class FaceTrack
+{
+    public readonly float Fps;
+    public readonly string[] Names;
+    public readonly float[] Weights;
+    public readonly int Frames;
+
+    public FaceTrack(float fps, string[] names, float[] weights)
+    {
+        Fps = fps > 0f ? fps : 30f;
+        Names = names ?? new string[0];
+        Weights = weights ?? new float[0];
+        Frames = Names.Length > 0 ? Weights.Length / Names.Length : 0;
+    }
+}
+
+/// <summary>
 /// Drives an NPC's face in five layers, all written once per frame in LateUpdate as offsets on top of the
 /// character's sculpted rest weights and the animated pose:
 /// (1) expression: the base mood, replaced by a transient emotion (<see cref="ShowEmotion"/>) or the
 /// Thinking face while the Animator's isThinking is on, with the library's idle face capture looping on top;
 /// (2) blinks, at random and on the speech's pauses and line ends; (3) mouth: TTS audio given to
-/// <see cref="Speak"/> (Rhubarb cues once they arrive, the clip's loudness until then), procedural babble
+/// <see cref="Speak"/> (Rhubarb cues once they arrive, the clip's loudness until then, or a face track such as
+/// Audio2Face's given to <see cref="SetFaceTrack"/>, which takes over the lower face), procedural babble
 /// while isTalking is on without audio (table chatter), otherwise rest; (4) speech gestures (<see cref="FaceGestures"/>):
 /// brow beats, Duchenne squints and sneers on the line's accents (found by <see cref="SpeechProsody"/>), head
 /// beats, posture shifts and question tilts on the neck and head bones, and gaze (look-aways, face scanning) on
@@ -81,6 +102,7 @@ public class NPCFace : MonoBehaviour
     private const float CueLeadSeconds = 0.03f;          // Mouths shape a sound slightly before it is heard
     private const float CueBlendSeconds = 0.04f;         // Between consecutive Rhubarb cues
     private const float CueArrivalBlendSeconds = 0.15f;  // Loudness jaw -> cue poses once cues arrive
+    private const float TrackBlendSeconds = 0.15f;       // Cue mouth <-> face track
     private const float EnvelopeHop = 0.01f;             // Loudness envelope resolution (seconds)
     private const float SpeechStartGrace = 0.5f;         // Speak() before the source starts playing
     private const float AudioMouthSmoothing = 0.02f;     // Time constants (seconds) of the mouth follow
@@ -180,6 +202,7 @@ public class NPCFace : MonoBehaviour
     private float[] _rest;          // Rest weight (0..100) captured at bind
     private float[] _written;       // Last weight written, to skip unchanged writes
     private bool[] _isMouthChannel; // mouth*, jaw*, cheekPuff*: scaled while the mouth layer is active
+    private bool[] _isLowerFace;    // mouth channels plus tongue*: what a face track drives
     private bool[] _opensMouth;     // Shapes that part the lips: damped in expressions (a held grin reads as mid-sentence)
     private bool[] _isEyeWide;      // eyeWide*: suppressed while blinking
     private float[] _add;           // Blink + mouth offsets of the current frame
@@ -249,6 +272,13 @@ public class NPCFace : MonoBehaviour
     private float[] _pcmChunk;
     private readonly float[] _outputBuffer = new float[256];
     private float _livePeak = 0.05f;
+
+    // Face track (Audio2Face): takes over the lower face of the line it belongs to
+    private FaceTrack _track;
+    private int[] _trackNames;      // Index into the track's names, per driven shape
+    private int[] _trackChannels;   // Channel of each driven shape
+    private float[] _trackValues;   // This frame's track weights per channel (held while the mix fades out)
+    private float _trackMix;        // 0..1, eased
 
     // Babble
     private bool _wasTalking;
@@ -392,6 +422,37 @@ public class NPCFace : MonoBehaviour
 
         if (logEvents)
             Debug.Log($"[NPCFace] {name} received {clean.Length} lip-sync cues");
+    }
+
+    /// <summary>
+    /// Hands the current line's lower face (mouth, jaw, cheek puff, tongue) to <paramref name="track"/>, crossfading
+    /// from the cue mouth; brows, eyes, blinks and head gestures stay NPCFace's own. Ignored when
+    /// <paramref name="clip"/> is not the clip currently given to <see cref="Speak"/> or the face isn't bound yet.
+    /// </summary>
+    public void SetFaceTrack(AudioClip clip, FaceTrack track)
+    {
+        if (!_hasSpeech || clip == null || clip != _speechClip || !_bound) return;
+        if (track == null || track.Frames == 0) return;
+
+        var names = new List<int>(track.Names.Length);
+        var channels = new List<int>(track.Names.Length);
+        for (int i = 0; i < track.Names.Length; i++)
+        {
+            int c = Channel(StripPrefix(track.Names[i]));
+            if (c < 0 || !_isLowerFace[c] || channels.Contains(c)) continue;
+            names.Add(i);
+            channels.Add(c);
+        }
+        if (channels.Count == 0) return;
+
+        System.Array.Clear(_trackValues, 0, _trackValues.Length);
+        _trackNames = names.ToArray();
+        _trackChannels = channels.ToArray();
+        _track = track;
+
+        if (logEvents)
+            Debug.Log($"[NPCFace] {name} face track: {track.Frames} frames at {track.Fps:0} fps, {channels.Count} shapes, " +
+                      $"from {SpeechTime():0.00}s");
     }
 
     /// <summary>Stops driving the mouth from audio; it eases back to rest. Does not stop the AudioSource.</summary>
@@ -560,6 +621,9 @@ public class NPCFace : MonoBehaviour
         _rest = new float[n];
         _written = new float[n];
         _isMouthChannel = new bool[n];
+        _isLowerFace = new bool[n];
+        _trackValues = new float[n];
+        _track = null;
         _isEyeWide = new bool[n];
         _opensMouth = new bool[n];
         _add = new float[n];
@@ -578,6 +642,7 @@ public class NPCFace : MonoBehaviour
             _isMouthChannel[c] = key.StartsWith("mouth", System.StringComparison.Ordinal) ||
                                  key.StartsWith("jaw", System.StringComparison.Ordinal) ||
                                  key.StartsWith("cheekPuff", System.StringComparison.Ordinal);
+            _isLowerFace[c] = _isMouthChannel[c] || key.StartsWith("tongue", System.StringComparison.Ordinal);
             _isEyeWide[c] = key.StartsWith("eyeWide", System.StringComparison.Ordinal);
             _opensMouth[c] = key.StartsWith("jawOpen", System.StringComparison.Ordinal) ||
                              key.StartsWith("mouthLowerDown", System.StringComparison.Ordinal) ||
@@ -1088,6 +1153,10 @@ public class NPCFace : MonoBehaviour
         if (speaking)
         {
             EvaluateSpeech();
+            if (_track != null) EvaluateTrack(SpeechTime());
+            // A face track takes over the mouth: the cue shapes give way as it fades in
+            for (int m = 0; m < MouthCount && _trackMix > 0f; m++)
+                _mouthTarget[m] *= 1f - _trackMix;
             tau = AudioMouthSmoothing;
             active = true;
         }
@@ -1125,7 +1194,28 @@ public class NPCFace : MonoBehaviour
         }
 
         _mouthActive = Mathf.MoveTowards(_mouthActive, active ? 1f : 0f, dt / MouthActiveFadeSeconds);
-        return _mouthState[MJaw];
+        _trackMix = Mathf.MoveTowards(_trackMix, speaking && _track != null ? 1f : 0f, dt / TrackBlendSeconds);
+
+        int jawChannel = _mouthChannel[MJaw];
+        float trackJaw = jawChannel >= 0 ? _trackValues[jawChannel] * _trackMix : 0f;
+        return Mathf.Max(_mouthState[MJaw], trackJaw);
+    }
+
+    /// <summary>Samples the face track at clip time t into _trackValues (linear between frames, held at the ends).</summary>
+    private void EvaluateTrack(float t)
+    {
+        FaceTrack track = _track;
+        int stride = track.Names.Length;
+        float x = Mathf.Clamp(t * track.Fps, 0f, track.Frames - 1);
+        int i = (int)x;
+        int j = Mathf.Min(i + 1, track.Frames - 1);
+        float k = x - i;
+        float[] w = track.Weights;
+        for (int s = 0; s < _trackChannels.Length; s++)
+        {
+            int n = _trackNames[s];
+            _trackValues[_trackChannels[s]] = Mathf.Lerp(w[i * stride + n], w[j * stride + n], k);
+        }
     }
 
     private float BabbleLimit()
@@ -1164,6 +1254,7 @@ public class NPCFace : MonoBehaviour
         _cues = null;
         _cuesArrivedAt = -1f;
         _envelopeLength = 0;
+        _track = null;   // Its last weights fade out with _trackMix
     }
 
     private void EvaluateSpeech()
@@ -1632,6 +1723,13 @@ public class NPCFace : MonoBehaviour
             // Idle lip drift stops while the lips shape words
             if (_isMouthChannel[c]) ambient *= 1f - _mouthActive;
             else if (_isEyeWide[c]) ambient *= wideScale;
+            // A face track owns the lower face: the expression's mouth gives way to it entirely
+            if (_trackMix > 0f && _isLowerFace[c])
+            {
+                expr *= 1f - _trackMix;
+                ambient *= 1f - _trackMix;
+                _add[c] += _trackValues[c] * _trackMix;
+            }
             _add[c] += expr + ambient;
         }
 

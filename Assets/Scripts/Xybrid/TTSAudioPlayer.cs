@@ -20,7 +20,8 @@ namespace Tavern.Dialogue
         [SerializeField] private float speakerMaxDistance = 12f;
         [SerializeField] private AudioRolloffMode speakerRolloff = AudioRolloffMode.Linear;
 
-        private const int SampleRate = 24000;
+        /// <summary>Sample rate of the PCM given to <see cref="PlayPCM"/> (Phonon TTS output).</summary>
+        public const int SampleRate = 24000;
         private const int Channels = 1;
 
         // Speaker following (SetSpeaker)

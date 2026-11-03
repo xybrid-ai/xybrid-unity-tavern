@@ -57,6 +57,21 @@ public class DialogueManagerV2 : MonoBehaviour
     [Header("TTS Audio")]
     [SerializeField] private TTSAudioPlayer _ttsPlayer;
 
+    /// <summary>How NVIDIA Audio2Face (the local dev bridge, <see cref="Audio2FaceBridge"/>) drives NPC mouths.</summary>
+    public enum Audio2FaceMode
+    {
+        Off,                    // Rhubarb lip sync only
+        SwapWhenReady,          // The voice starts at once; the mouth switches to Audio2Face when its track is ready
+        HoldVoiceUntilReady     // Each line waits for its Audio2Face track and uses it from the first word
+    }
+
+    [Header("Audio2Face (dev bridge)")]
+    [Tooltip("NVIDIA Audio2Face-3D mouth from the local Python worker (tools/audio2face; Editor on macOS). " +
+             "Off: Rhubarb only. Swap When Ready: the voice starts at once and the mouth switches to Audio2Face " +
+             "about a quarter of the line in. Hold Voice Until Ready: each line waits for its track (about a quarter " +
+             "of its length) and uses it throughout. Brows, eyes and head stay NPCFace's own either way.")]
+    [SerializeField] private Audio2FaceMode audio2Face = Audio2FaceMode.Off;
+
     [Header("Debug")]
     [SerializeField] private NPCDebugPanel npcDebugPanel;
 
@@ -104,8 +119,10 @@ public class DialogueManagerV2 : MonoBehaviour
             _panelCanvasGroup = dialoguePanel.AddComponent<CanvasGroup>();
         _panelCanvasGroup.alpha = 0f;
 
-        // Lip sync's CLI copy is prepared while the models load, not on the first spoken line
+        // Lip sync's CLI copy (and the Audio2Face worker, when on) start while the models load, not on the first line
         RhubarbLipSync.Prewarm();
+        if (audio2Face != Audio2FaceMode.Off)
+            Audio2FaceBridge.Prewarm();
 
         // Initialize providers
         _scriptedProvider = new ScriptedDialogueProvider();
@@ -439,7 +456,7 @@ public class DialogueManagerV2 : MonoBehaviour
     /// <summary>
     /// Synthesizes and plays <paramref name="text"/> in <paramref name="npc"/>'s voice, positioned at their head.
     /// Their NPCFace (if any) lip-syncs from the clip's spectrum right away, then from Rhubarb visemes once
-    /// analysed (Phonon reports no timings of its own).
+    /// analysed (Phonon reports no timings of its own), or from an Audio2Face track when the dev bridge is on.
     /// </summary>
     private async Task PlayTTSAsync(NPCIdentity npc, string text, string voiceId, float speed = 1.0f)
     {
@@ -456,6 +473,20 @@ public class DialogueManagerV2 : MonoBehaviour
             if (session != _dialogueSession || _ttsPlayer == null) return;
             if (pcm == null || pcm.Length == 0) return;
 
+            // Audio2Face (dev bridge) analyses the same PCM; holding the voice waits for its track first
+            Task<FaceTrack> trackTask = StartAudio2Face(npc, text, pcm);
+            FaceTrack heldTrack = null;
+            if (trackTask != null && audio2Face == Audio2FaceMode.HoldVoiceUntilReady)
+            {
+                float holdStart = Time.realtimeSinceStartup;
+                heldTrack = await trackTask;
+                trackTask = null;
+                if (session != _dialogueSession || _ttsPlayer == null) return;
+                Debug.Log($"[DialogueManager] Audio2Face held {npc.name}'s voice " +
+                          $"{(Time.realtimeSinceStartup - holdStart) * 1000f:0} ms " +
+                          (heldTrack != null ? $"({heldTrack.Frames} frames)" : "(no track: Rhubarb lip sync)"));
+            }
+
             _ttsPlayer.SetSpeaker(npc != null ? npc.transform : null);
             AudioClip clip = _ttsPlayer.PlayPCM(pcm);
             if (clip == null || npc == null) return;
@@ -465,14 +496,18 @@ public class DialogueManagerV2 : MonoBehaviour
             NPCFace face = npc.GetComponentInChildren<NPCFace>();
             if (face == null) return;
             face.Speak(_ttsPlayer.Source, clip, text);
+            if (heldTrack != null)
+                face.SetFaceTrack(clip, heldTrack);
+            else if (trackTask != null)
+                _ = ApplyFaceTrackWhenReadyAsync(face, clip, trackTask, session);
 
-            // Instant in-engine visemes from the clip's spectrum (works everywhere); Rhubarb, guided by
-            // the transcript, refines them a moment later
+            // Instant in-engine visemes from the clip's spectrum (works everywhere); Rhubarb refines them a moment later
             LipSyncCue[] spectralCues = SpectralLipSync.Analyze(clip);
             if (spectralCues != null)
                 face.SetLipSyncCues(clip, spectralCues);
 
-            if (!RhubarbLipSync.IsAvailable) return;
+            // A held Audio2Face track owns this line's mouth; otherwise Rhubarb carries it (or its start, when swapping)
+            if (heldTrack != null || !RhubarbLipSync.IsAvailable) return;
             float analysisStart = Time.realtimeSinceStartup;
             LipSyncCue[] cues = await RhubarbLipSync.AnalyzeAsync(clip, text);
             // Stale session, failed analysis, or the clip was replaced/destroyed by a newer line
@@ -484,6 +519,44 @@ public class DialogueManagerV2 : MonoBehaviour
         catch (System.Exception ex)
         {
             Debug.LogWarning($"[DialogueManager] TTS failed (non-fatal): {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Starts Audio2Face on a line's PCM when the dev bridge is on and set up, with the line's emotion (or the NPC's
+    /// base mood when the line's is faint); null otherwise.
+    /// </summary>
+    private Task<FaceTrack> StartAudio2Face(NPCIdentity npc, string text, byte[] pcm)
+    {
+        if (audio2Face == Audio2FaceMode.Off || npc == null || !Audio2FaceBridge.IsAvailable) return null;
+        NPCFace face = npc.GetComponentInChildren<NPCFace>();
+        if (face == null) return null;
+
+        FaceEmotion emotion = face.BaseMood;
+        float intensity = 0.45f;
+        if (LineEmotion.TryAnalyze(text, out FaceEmotion lineEmotion, out float lineIntensity) && lineIntensity >= 0.45f)
+        {
+            emotion = lineEmotion;
+            intensity = lineIntensity;
+        }
+        return Audio2FaceBridge.AnalyzeAsync(pcm, TTSAudioPlayer.SampleRate, Audio2FaceBridge.EmotionFor(emotion, intensity));
+    }
+
+    /// <summary>Hands the Audio2Face track to the face once it's ready, if the line is still the current one.</summary>
+    private async Task ApplyFaceTrackWhenReadyAsync(NPCFace face, AudioClip clip, Task<FaceTrack> trackTask, int session)
+    {
+        try
+        {
+            FaceTrack track = await trackTask;
+            if (track == null || session != _dialogueSession || face == null || clip == null) return;
+            AudioSource source = _ttsPlayer != null ? _ttsPlayer.Source : null;
+            if (source == null || source.clip != clip) return;
+            face.SetFaceTrack(clip, track);
+            Debug.Log($"[DialogueManager] Audio2Face mouth for {face.name} from {source.time:0.00}s into a {clip.length:0.0}s line");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning($"[DialogueManager] Audio2Face track failed (non-fatal): {ex.Message}");
         }
     }
 
