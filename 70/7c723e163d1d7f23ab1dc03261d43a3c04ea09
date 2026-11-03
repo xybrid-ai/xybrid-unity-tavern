@@ -1,0 +1,43 @@
+tools/audio2face/LICENSE-NVIDIA-Audio2Face-3D-SDK.txt
+  s_5502e4c590b55f::t_c8cc41d2804f45 1-21
+tools/audio2face/requirements.txt
+  s_5502e4c590b55f::t_944bbd19ef414b 1-2
+Assets/Scripts/NPCFace.cs
+  s_5502e4c590b55f::t_8883c4557073d8 43-44
+  s_5502e4c590b55f::t_4b6d86085d6af3 18-36,105,205,276-282,427-457,624-626,645,1156-1159,1197-1218,1257,1726-1732
+  s_5502e4c590b55f::t_9fafb67b11be3d 17
+tools/audio2face/a2f_worker.py
+  s_5502e4c590b55f::t_dd0bcd76e41d7a 1-69
+Assets/Scripts/Xybrid/DialogueManagerV2.cs
+  s_5502e4c590b55f::t_30c442eebe9177 459,504
+  s_5502e4c590b55f::t_6e842612519d33 60-74,122,124-125,476-489,499-502,509-510,525-561
+  s_5502e4c590b55f::t_8b0de26a0ed471 562
+tools/audio2face/a2f_mark.py
+  s_5502e4c590b55f::t_c8cc41d2804f45 1-637
+Assets/Scripts/Xybrid/TTSAudioPlayer.cs
+  s_5502e4c590b55f::t_6e842612519d33 23-24
+.gitignore
+  s_5502e4c590b55f::t_30c442eebe9177 78-81
+Assets/Scripts/Audio2FaceBridge.cs
+  s_5502e4c590b55f::t_0c8b97a7ef39ad 1-394
+tools/audio2face/README.md
+  s_5502e4c590b55f::t_c1394f0a7cf0db 1-46
+Assets/Scripts/Audio2FaceBridge.cs.meta
+  s_5502e4c590b55f::t_3971bc0af73b5f 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "707c723e163d1d7f23ab1dc03261d43a3c04ea09",
+  "prompts": {},
+  "sessions": {
+    "s_5502e4c590b55f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cea3b300-d521-4c3d-9d9a-f849f9a0378a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
