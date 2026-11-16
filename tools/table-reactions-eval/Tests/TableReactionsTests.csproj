@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Runs the same NUnit fixtures as Unity's EditMode runner (Assets/Scripts/Social/Tests) against the
+       Unity-free sources, for a fast inner loop. Unity's runner remains the project's official check. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <LangVersion>9.0</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../Assets/Scripts/Social/*.cs" />
+    <Compile Include="../../../Assets/Scripts/Social/Tests/*.cs" />
+    <None Include="../../../Assets/Scripts/Social/Tests/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="Fixtures" />
+    <None Include="../../../Assets/Resources/TableReactions/*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="Fixtures" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+  </ItemGroup>
+</Project>

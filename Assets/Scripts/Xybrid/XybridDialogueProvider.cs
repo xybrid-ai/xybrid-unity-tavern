@@ -23,6 +23,10 @@ namespace Tavern.Dialogue
         private readonly Dictionary<string, ConversationContext> _npcContexts
             = new Dictionary<string, ConversationContext>();
 
+        // Bumped by ClearNPCContext. A run that started before a clear must not push its turns into the
+        // cleared history (the dialogue was closed while it ran; DialogueManagerV2 already discards the reply).
+        private readonly Dictionary<string, int> _contextEpochs = new Dictionary<string, int>();
+
         public string ProviderName => $"Xybrid ({_service.ModelId})";
         public bool SupportsFreeInput => true;
         public bool SupportsStreaming => true;
@@ -87,6 +91,7 @@ namespace Tavern.Dialogue
                 return DialogueResponse.FromError("XybridModelService not ready");
 
             var context = GetOrCreateContext(npc);
+            int epoch = ContextEpoch(npc.npcName);
             bool streaming = onToken != null;
 
             Debug.Log($"[XybridProvider] {(streaming ? "Streaming" : "Non-streaming")} for {npc.npcName} (input: {userInput.Length} chars)");
@@ -94,6 +99,13 @@ namespace Tavern.Dialogue
             var response = streaming
                 ? await _service.RunStreamingAsync(userInput, context, onToken)
                 : await _service.RunInferenceAsync(userInput, context);
+
+            if (response.Success && ContextEpoch(npc.npcName) != epoch)
+            {
+                Debug.Log($"[XybridProvider] {npc.npcName}'s context was cleared while this reply ran; not recording it.");
+                response.Text = CleanResponse(response.Text);
+                return response;
+            }
 
             if (response.Success)
             {
@@ -182,8 +194,12 @@ namespace Tavern.Dialogue
             return asset.text.Trim();
         }
 
+        private int ContextEpoch(string npcName)
+            => _contextEpochs.TryGetValue(npcName, out int epoch) ? epoch : 0;
+
         public void ClearNPCContext(string npcName)
         {
+            _contextEpochs[npcName] = ContextEpoch(npcName) + 1;
             if (_npcContexts.TryGetValue(npcName, out var context))
             {
                 context.Clear(); // Wipes history, keeps system prompt

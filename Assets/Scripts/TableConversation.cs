@@ -70,6 +70,9 @@ public class TableConversation : MonoBehaviour
         // Deferred Social look target (lets listeners react one after another)
         public Transform PendingLook;
         public float PendingLookTime;
+
+        // A table reaction is playing: skip this member for the watch loop's random player glance
+        public float GlanceSuppressedUntil;
     }
 
     private enum Mode { Idle, Chatting, Resuming, WatchingDialogue }
@@ -84,6 +87,21 @@ public class TableConversation : MonoBehaviour
 
     /// <summary>True while the turn-taking loop runs (false while paused for, or resuming after, player dialogue).</summary>
     public bool IsChatting => _mode == Mode.Chatting;
+
+    /// <summary>The members configured for this table (may contain nulls if the Inspector list has gaps).</summary>
+    public IReadOnlyList<NPCIdentity> Members => members ?? System.Array.Empty<NPCIdentity>();
+
+    /// <summary>
+    /// Keeps the watch loop's random player glance off <paramref name="npc"/> for <paramref name="seconds"/>,
+    /// so it doesn't stack on top of a table reaction.
+    /// </summary>
+    public void SuppressWatchGlance(NPCIdentity npc, float seconds)
+    {
+        int index = IndexOf(npc);
+        if (index < 0) return;
+        Member member = _members[index];
+        member.GlanceSuppressedUntil = Mathf.Max(member.GlanceSuppressedUntil, Time.time + seconds);
+    }
 
     // ================================================================
     // Lifecycle
@@ -418,6 +436,7 @@ public class TableConversation : MonoBehaviour
             if (watcher < 0) continue;
 
             Member member = _members[watcher];
+            if (Time.time < member.GlanceSuppressedUntil) continue;
             Transform eyes = member.LookAt != null ? member.LookAt.PlayerEyes : null;
             if (eyes == null) continue;
 

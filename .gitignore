@@ -20,6 +20,8 @@
 /Assets/Resources/*
 !/Assets/Resources/NPCPrompts/
 !/Assets/Resources/NPCPrompts.meta
+!/Assets/Resources/TableReactions/
+!/Assets/Resources/TableReactions.meta
 !/Assets/Settings/
 !/Assets/Settings.meta
 !/Assets/Scenes/
@@ -79,3 +81,10 @@ mono_crash.*
 # Audio2Face dev bridge: local Python environment (model files live outside the repo)
 /tools/audio2face/.venv/
 __pycache__/
+
+# Re-include source that the binary patterns above catch by accident:
+# "*.so*" matches ".Social" because core.ignorecase is on (macOS), and the dev
+# harness projects under tools/ are hand-written, not Unity-generated.
+!/Assets/Scripts/**/*.asmdef
+!/Assets/Scripts/**/*.asmdef.meta
+!/tools/**/*.csproj

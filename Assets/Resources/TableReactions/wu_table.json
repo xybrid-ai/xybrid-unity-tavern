@@ -1,0 +1,154 @@
+{
+  "tableId": "wu_table",
+  "source": "Facts are condensed from Assets/Resources/NPCPrompts/{Master Wu,Shara,Varien}.md. Do not add facts that are not in those files.",
+  "setting": "The Rusty Flagon tavern in Millbrook, evening. Master Wu sits at a corner table with his two students, Shara and Varien.",
+  "members": [
+    {
+      "id": "wu", "npcName": "Master Wu", "displayName": "Master Wu", "pronoun": "he",
+      "aliases": ["wu", "master wu", "master", "your master", "your teacher", "teacher"],
+      "facts": [
+        "Ancient martial arts master who has trained warriors for sixty years; teacher of Shara and Varien.",
+        "Speaks sparely and calmly and never raises his voice.",
+        "Tries to temper Shara's fire and build up Varien's confidence."
+      ]
+    },
+    {
+      "id": "shara", "npcName": "Shara", "displayName": "Shara", "pronoun": "she",
+      "aliases": ["shara"],
+      "facts": [
+        "Young woman in her early twenties; Master Wu's student for three years.",
+        "Enthusiastic, loud and optimistic; doesn't know when to be quiet.",
+        "Just landed her first flying crescent kick; a former blacksmith's apprentice.",
+        "Idolizes Varien's technique but wishes he'd speak up more; adores Master Wu; sees the best in everyone."
+      ]
+    },
+    {
+      "id": "varien", "npcName": "Varien", "displayName": "Varien", "pronoun": "he",
+      "aliases": ["varien"],
+      "facts": [
+        "Quiet 26-year-old; Master Wu's student for five years, longer than Shara.",
+        "Specializes in defensive techniques and doesn't believe he's any good.",
+        "Speaks hesitantly, apologizes, deflects compliments and compares himself unfavorably to others.",
+        "Secretly admires Shara's confidence and hangs on every word Master Wu says."
+      ]
+    }
+  ],
+  "policy": {
+    "cooldownSeconds": 8,
+    "skipChance": 0.2,
+    "selfSkipChance": 0.05,
+    "minStaggerSeconds": 0.3,
+    "firstDelaySeconds": [0.25, 0.7],
+    "staggerSeconds": [0.35, 0.9],
+    "gazeSeconds": [1.2, 2.0],
+    "faceHoldSeconds": [1.4, 2.4],
+    "rules": [
+      { "listener": "shara", "relation": "self", "meaning": "praise", "options": [
+        { "key": "beam", "weight": 0.55, "gaze": "player", "gesture": "nod", "face": "Happy", "intensity": 0.5 },
+        { "key": "delight", "weight": 0.3, "gaze": "player", "face": "Delighted", "intensity": 0.45 },
+        { "key": "nothing", "weight": 0.15 } ] },
+      { "listener": "shara", "relation": "self", "meaning": "criticism", "options": [
+        { "key": "protest", "weight": 0.5, "gaze": "player", "gesture": "shake", "face": "Surprised", "intensity": 0.5 },
+        { "key": "stung", "weight": 0.3, "gaze": "player", "face": "Worried", "intensity": 0.4 },
+        { "key": "nothing", "weight": 0.2 } ] },
+      { "listener": "shara", "relation": "self", "meaning": "concern", "options": [
+        { "key": "surprised", "weight": 0.7, "gaze": "player", "face": "Surprised", "intensity": 0.3 },
+        { "key": "nothing", "weight": 0.3 } ] },
+      { "listener": "shara", "relation": "self", "meaning": "neutral", "options": [
+        { "key": "look", "weight": 0.5, "gaze": "player" },
+        { "key": "nothing", "weight": 0.5 } ] },
+      { "listener": "shara", "relation": "peer", "meaning": "praise", "options": [
+        { "key": "agree", "weight": 0.6, "gaze": "referent", "gesture": "nod", "face": "Happy", "intensity": 0.4 },
+        { "key": "beam_at_player", "weight": 0.25, "gaze": "player", "gesture": "nod", "face": "Happy", "intensity": 0.35 },
+        { "key": "nothing", "weight": 0.15 } ] },
+      { "listener": "shara", "relation": "peer", "meaning": "criticism", "options": [
+        { "key": "defend", "weight": 0.5, "gaze": "player", "gesture": "shake", "face": "Suspicious", "intensity": 0.3 },
+        { "key": "worry_for", "weight": 0.35, "gaze": "referent", "face": "Worried", "intensity": 0.35 },
+        { "key": "nothing", "weight": 0.15 } ] },
+      { "listener": "shara", "relation": "peer", "meaning": "concern", "options": [
+        { "key": "check_on", "weight": 0.75, "gaze": "referent", "face": "Worried", "intensity": 0.35 },
+        { "key": "nothing", "weight": 0.25 } ] },
+      { "listener": "shara", "relation": "addressee", "meaning": "praise", "options": [
+        { "key": "agree", "weight": 0.7, "gesture": "nod", "face": "Happy", "intensity": 0.35 },
+        { "key": "nothing", "weight": 0.3 } ] },
+      { "listener": "shara", "relation": "addressee", "meaning": "criticism", "options": [
+        { "key": "bristle", "weight": 0.6, "gaze": "player", "face": "Suspicious", "intensity": 0.35 },
+        { "key": "disagree", "weight": 0.25, "gaze": "player", "gesture": "shake" },
+        { "key": "nothing", "weight": 0.15 } ] },
+      { "listener": "shara", "relation": "addressee", "meaning": "concern", "options": [
+        { "key": "check_on", "weight": 0.6, "gaze": "addressee", "face": "Worried", "intensity": 0.3 },
+        { "key": "nothing", "weight": 0.4 } ] },
+
+      { "listener": "varien", "relation": "self", "meaning": "praise", "options": [
+        { "key": "deflect", "weight": 0.6, "gesture": "glance_away", "face": "Worried", "intensity": 0.35 },
+        { "key": "bashful", "weight": 0.25, "gaze": "player", "face": "Worried", "intensity": 0.3 },
+        { "key": "nothing", "weight": 0.15 } ] },
+      { "listener": "varien", "relation": "self", "meaning": "criticism", "options": [
+        { "key": "wilt", "weight": 0.6, "gesture": "glance_away", "face": "Sad", "intensity": 0.4 },
+        { "key": "look_up", "weight": 0.25, "gaze": "player", "face": "Worried", "intensity": 0.4 },
+        { "key": "nothing", "weight": 0.15 } ] },
+      { "listener": "varien", "relation": "self", "meaning": "concern", "options": [
+        { "key": "caught", "weight": 0.6, "gaze": "player", "face": "Worried", "intensity": 0.3 },
+        { "key": "look_away", "weight": 0.25, "gesture": "glance_away", "face": "Worried", "intensity": 0.25 },
+        { "key": "nothing", "weight": 0.15 } ] },
+      { "listener": "varien", "relation": "self", "meaning": "neutral", "options": [
+        { "key": "look", "weight": 0.4, "gaze": "player" },
+        { "key": "nothing", "weight": 0.6 } ] },
+      { "listener": "varien", "relation": "peer", "meaning": "praise", "options": [
+        { "key": "admire", "weight": 0.6, "gaze": "referent", "face": "Content", "intensity": 0.3 },
+        { "key": "nod", "weight": 0.25, "gaze": "referent", "gesture": "nod" },
+        { "key": "nothing", "weight": 0.15 } ] },
+      { "listener": "varien", "relation": "peer", "meaning": "criticism", "options": [
+        { "key": "glance", "weight": 0.6, "gaze": "referent", "face": "Worried", "intensity": 0.3 },
+        { "key": "uneasy", "weight": 0.2, "gaze": "player", "face": "Worried", "intensity": 0.25 },
+        { "key": "nothing", "weight": 0.2 } ] },
+      { "listener": "varien", "relation": "peer", "meaning": "concern", "options": [
+        { "key": "check_on", "weight": 0.7, "gaze": "referent", "face": "Worried", "intensity": 0.3 },
+        { "key": "nothing", "weight": 0.3 } ] },
+      { "listener": "varien", "relation": "addressee", "meaning": "praise", "options": [
+        { "key": "nod", "weight": 0.6, "gaze": "addressee", "gesture": "nod" },
+        { "key": "content", "weight": 0.25, "gaze": "addressee", "face": "Content", "intensity": 0.3 },
+        { "key": "nothing", "weight": 0.15 } ] },
+      { "listener": "varien", "relation": "addressee", "meaning": "criticism", "options": [
+        { "key": "uneasy", "weight": 0.6, "gaze": "addressee", "face": "Worried", "intensity": 0.3 },
+        { "key": "look_up", "weight": 0.2, "gaze": "player", "face": "Worried", "intensity": 0.25 },
+        { "key": "nothing", "weight": 0.2 } ] },
+      { "listener": "varien", "relation": "addressee", "meaning": "concern", "options": [
+        { "key": "check_on", "weight": 0.6, "gaze": "addressee", "face": "Worried", "intensity": 0.3 },
+        { "key": "nothing", "weight": 0.4 } ] },
+
+      { "listener": "*", "relation": "self", "meaning": "unclear", "options": [
+        { "key": "look", "weight": 0.5, "gaze": "player" },
+        { "key": "nothing", "weight": 0.5 } ] },
+
+      { "listener": "wu", "relation": "self", "meaning": "praise", "options": [
+        { "key": "content", "weight": 0.5, "gaze": "player", "face": "Content", "intensity": 0.25 },
+        { "key": "nothing", "weight": 0.5 } ] },
+      { "listener": "wu", "relation": "self", "meaning": "criticism", "options": [
+        { "key": "regard", "weight": 0.5, "gaze": "player" },
+        { "key": "nothing", "weight": 0.5 } ] },
+      { "listener": "wu", "relation": "peer", "meaning": "praise", "options": [
+        { "key": "quiet_nod", "weight": 0.5, "gesture": "nod" },
+        { "key": "glance_student", "weight": 0.3, "gaze": "referent", "face": "Content", "intensity": 0.25 },
+        { "key": "nothing", "weight": 0.2 } ] },
+      { "listener": "wu", "relation": "peer", "meaning": "criticism", "options": [
+        { "key": "glance_student", "weight": 0.4, "gaze": "referent" },
+        { "key": "regard_player", "weight": 0.3, "gaze": "player" },
+        { "key": "nothing", "weight": 0.3 } ] },
+      { "listener": "wu", "relation": "peer", "meaning": "concern", "options": [
+        { "key": "glance_student", "weight": 0.6, "gaze": "referent", "face": "Worried", "intensity": 0.2 },
+        { "key": "nothing", "weight": 0.4 } ] },
+      { "listener": "wu", "relation": "addressee", "meaning": "praise", "options": [
+        { "key": "quiet_nod", "weight": 0.4, "gesture": "nod" },
+        { "key": "content", "weight": 0.3, "gaze": "addressee", "face": "Content", "intensity": 0.25 },
+        { "key": "nothing", "weight": 0.3 } ] },
+      { "listener": "wu", "relation": "addressee", "meaning": "criticism", "options": [
+        { "key": "watch_student", "weight": 0.4, "gaze": "addressee" },
+        { "key": "regard_player", "weight": 0.3, "gaze": "player" },
+        { "key": "nothing", "weight": 0.3 } ] },
+      { "listener": "wu", "relation": "addressee", "meaning": "concern", "options": [
+        { "key": "watch_student", "weight": 0.6, "gaze": "addressee", "face": "Worried", "intensity": 0.2 },
+        { "key": "nothing", "weight": 0.4 } ] }
+    ]
+  }
+}

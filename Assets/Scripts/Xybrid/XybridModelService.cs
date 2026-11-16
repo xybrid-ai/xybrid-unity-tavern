@@ -312,7 +312,7 @@ namespace Tavern.Dialogue
             if (entry == null)
                 return DialogueResponse.FromError("No LLM model loaded");
 
-            await entry.Lock.WaitAsync();
+            await WaitForegroundAsync(entry);
             try
             {
                 string result = null;
@@ -371,7 +371,7 @@ namespace Tavern.Dialogue
             if (entry == null)
                 return DialogueResponse.FromError("No LLM model loaded");
 
-            await entry.Lock.WaitAsync();
+            await WaitForegroundAsync(entry);
             try
             {
                 string result = null;
@@ -417,6 +417,92 @@ namespace Tavern.Dialogue
             {
                 Debug.LogError($"[XybridModelService] Streaming inference failed: {ex.Message}");
                 return DialogueResponse.FromError(ex.Message);
+            }
+            finally
+            {
+                entry.Lock.Release();
+            }
+        }
+
+        // ================================================================
+        // Background (low-priority) LLM runs
+        // ================================================================
+
+        /// <summary>Result of <see cref="RunBackgroundAsync"/> with its queue and inference timings.</summary>
+        public sealed class BackgroundRunResult
+        {
+            public bool Success;
+            public string Text;
+            public string Error;
+            public double QueueWaitMs;
+            public double InferenceMs;
+            public string ModelId;
+        }
+
+        private static async Task WaitForegroundAsync(ModelEntry entry)
+        {
+            Interlocked.Increment(ref entry.ForegroundPending);
+            try
+            {
+                await entry.Lock.WaitAsync();
+            }
+            finally
+            {
+                Interlocked.Decrement(ref entry.ForegroundPending);
+            }
+        }
+
+        /// <summary>
+        /// Low-priority LLM run on the shared dialogue model, for background judgments (table reactions).
+        /// It never starts while a player-facing request is waiting for the model and can be cancelled until
+        /// it starts; once running, a batch run can't be interrupted, so keep <paramref name="config"/>'s
+        /// max tokens small. Uses its own <paramref name="context"/>, never an NPC's dialogue history.
+        /// </summary>
+        public async Task<BackgroundRunResult> RunBackgroundAsync(string userInput, ConversationContext context,
+            GenerationConfig config, CancellationToken cancellationToken)
+        {
+            if (!_isReady)
+                return new BackgroundRunResult { Error = "XybridModelService not ready" };
+
+            var entry = GetLLMEntry();
+            if (entry == null)
+                return new BackgroundRunResult { Error = "No LLM model loaded" };
+
+            var waited = System.Diagnostics.Stopwatch.StartNew();
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (Volatile.Read(ref entry.ForegroundPending) == 0 && entry.Lock.Wait(0))
+                {
+                    // A reply may have queued between the check and the acquire: let it go first
+                    if (Volatile.Read(ref entry.ForegroundPending) == 0) break;
+                    entry.Lock.Release();
+                }
+                await Task.Delay(25, cancellationToken);
+            }
+            double queueWaitMs = waited.Elapsed.TotalMilliseconds;
+
+            try
+            {
+                var result = new BackgroundRunResult { QueueWaitMs = queueWaitMs, ModelId = entry.Model.ModelId };
+                var inference = System.Diagnostics.Stopwatch.StartNew();
+                await Task.Run(() =>
+                {
+                    using (var envelope = Envelope.Text(userInput))
+                    using (var inferenceResult = entry.Model.Run(envelope, context, config, cancellationToken))
+                    {
+                        result.Success = inferenceResult.Success;
+                        result.Text = inferenceResult.Text;
+                        result.Error = inferenceResult.Success ? null : inferenceResult.Error ?? "Inference failed";
+                    }
+                });
+                result.InferenceMs = inference.Elapsed.TotalMilliseconds;
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[XybridModelService] Background inference failed: {ex.Message}");
+                return new BackgroundRunResult { Error = ex.Message, QueueWaitMs = queueWaitMs };
             }
             finally
             {
@@ -555,6 +641,8 @@ namespace Tavern.Dialogue
             /// <summary>Task override for models loaded without an asset (e.g., raw GGUF).</summary>
             public string Task;
             public readonly SemaphoreSlim Lock = new SemaphoreSlim(1, 1);
+            /// <summary>Player-facing requests waiting for <see cref="Lock"/>; background runs yield to them.</summary>
+            public int ForegroundPending;
         }
     }
 }
