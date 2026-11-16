@@ -224,6 +224,15 @@ So: Xybrid's d1 is good enough on labels, but too slow for this feature until it
 would cut it to 1–2 s but were not tested for accuracy. The Tavern stays on the 0.16.0 checkout; nothing
 was integrated in Unity.
 
+## Human check (2026-11-16)
+
+First informal rating, after a frames-only run (Off pass, then d1 pass; not blind). The right characters
+reacted and the listeners were visible, but "they don't have expressions, they just look at me", and the d1
+pass felt the "same" as the Off pass. At the authored intensities (faces 0.3–0.5, looks of 1.2–2 s) a d1
+reaction is hard to tell apart from the watcher's random glances. Interpretation is no longer the
+bottleneck; how visible the reaction is, is. Next: a blind test of whether a player can tell which line a
+character reacted to.
+
 ## Recommendation: revise (keep the d1 path, drop the Gemma baseline)
 
 - d1 interprets clearly better than rules and the dialogue model: referent and meaning at 82%, no reaction
