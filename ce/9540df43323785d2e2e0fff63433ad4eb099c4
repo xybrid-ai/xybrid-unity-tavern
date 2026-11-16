@@ -1,0 +1,184 @@
+Assets/Scripts/Xybrid/XybridModelService.cs
+  s_91e1a442bbdaf7::t_33cef75f80dd10 315,374,427-512,644-645
+Assets/Scripts/Social/TableProfile.cs
+  s_91e1a442bbdaf7::t_8486e537d57f9b 78-79,162
+  s_91e1a442bbdaf7::t_e27145ff2a8f3a 1-77,80-161,163-278
+Assets/Scripts/Social/ReactionGate.cs
+  s_91e1a442bbdaf7::t_9ac395934f6287 1-118
+Assets/Scripts/Social/Tavern.Social.asmdef
+  s_91e1a442bbdaf7::t_39086125ed2137 1-16
+Assets/Scripts/Social/Tests/Tavern.Social.Tests.asmdef
+  s_91e1a442bbdaf7::t_e9a23f5a177155 1-25
+Assets/Scripts/TableReactions/TableReactionDirector.cs
+  s_91e1a442bbdaf7::t_359b91ed2721ae 217,291,319-327,329-351,397,405-406,408,425,427,447,552-553
+  s_91e1a442bbdaf7::t_1b127fb24f880a 1-216,218-290,292-318,328,352-396,398-404,407,409-424,426,428-446,448-551,554-624
+Assets/Scripts/Social/ReactionTrace.cs
+  s_91e1a442bbdaf7::t_a4f38252949785 1-46,49-70,73-142
+  s_91e1a442bbdaf7::t_359b91ed2721ae 47-48
+  s_91e1a442bbdaf7::t_f4946c530e6d34 71-72
+tools/table-reactions-eval/.gitignore
+  s_91e1a442bbdaf7::t_f46d8cc1faa56c 1-4
+Assets/Scripts/Social/GemmaStructuredJudge.cs
+  s_91e1a442bbdaf7::t_2156464f5bf7c3 114-115,132,140-144,147
+  s_91e1a442bbdaf7::t_f10a3b524d4e6a 1-38,40,48-113,116-131,133,145,148-152,154,157-159,162-163,167-184,187-194,196-197,199-200,202-207
+  s_91e1a442bbdaf7::t_a9643e81f5efad 135-136
+  s_91e1a442bbdaf7::t_d7fe96e64deec2 39,41-47,134,139,146,160-161,164,185-186,195,198,201
+  s_91e1a442bbdaf7::t_d08fd9c22ed5c8 137-138,153,155-156
+  s_91e1a442bbdaf7::t_8798bde4d815cd 165-166
+Assets/Scripts/Social/Tests/SocialTestSupport.cs
+  s_91e1a442bbdaf7::t_84d4bc6b949a36 1-98
+Assets/Scripts/Social/Tests/JudgeTests.cs
+  s_91e1a442bbdaf7::t_d7fe96e64deec2 125-130,136,144-149
+  s_91e1a442bbdaf7::t_1f2b1d590678aa 2,39,182-183
+  s_91e1a442bbdaf7::t_b33b1f5db428c3 1,3-38,40-123,131-135,137-143,150-181,184-194
+  s_91e1a442bbdaf7::t_d08fd9c22ed5c8 124
+docs/decision-model-vs-gemma.md
+  s_91e1a442bbdaf7::t_29793651051842 1-30,32-48,52-91
+  s_91e1a442bbdaf7::t_47db5a263ad136 49-51
+  s_91e1a442bbdaf7::t_6c7e7e4626acdd 31
+Assets/Scripts/TableConversation.cs
+  s_91e1a442bbdaf7::t_f2953f95767eeb 73-75,91-105,439
+Assets/Scripts/Social/IListenerJudge.cs
+  s_91e1a442bbdaf7::t_d53f9e5b6212ff 83-84
+  s_91e1a442bbdaf7::t_20f40cf708fdf3 1-82,85-175
+Assets/Scripts/TableReactions/FrameTimeProbe.cs
+  s_91e1a442bbdaf7::t_772a78ae19fceb 1-89
+Assets/Scripts/Social/ListenerJudgment.cs
+  s_91e1a442bbdaf7::t_f36b71ef670a19 1-162
+tools/d1-sidecar/.gitignore
+  s_91e1a442bbdaf7::t_739d2c596a427a 1
+Assets/Scripts/Editor/TableReactionMenu.cs
+  s_91e1a442bbdaf7::t_38be57bc040f4f 17,25,29-42
+  s_91e1a442bbdaf7::t_b1caaf2cf179dd 1-16,18-24,26-28,43-44
+Assets/Scripts/Xybrid/DialogueManagerV2.cs
+  s_91e1a442bbdaf7::t_0f5ab83ed9dfe3 33-73,144-145,256-259,320,326-327,344,365,398-401,428,467-471,476,498,959,961,1037-1054,1063,1066-1067,1088
+  s_91e1a442bbdaf7::t_c48121da39b6ba 377-393
+Assets/Scripts/TableReactions/ListenerReactionPerformer.cs
+  s_91e1a442bbdaf7::t_232092b6396065 1-134
+Assets/Scripts/Editor/TableReactionEval.cs
+  s_91e1a442bbdaf7::t_e7bed92e1cf0e0 1-103,105-244
+  s_91e1a442bbdaf7::t_2156464f5bf7c3 104
+Assets/Scripts/TableReactions/TableReactionLiveCheck.cs.meta
+  s_91e1a442bbdaf7::t_7ede01769465c6 1-2
+Assets/Scripts/Social/ReactionPolicy.cs
+  s_91e1a442bbdaf7::t_79e7c07ba5a4d4 1-112,114-170,195-259
+  s_91e1a442bbdaf7::t_187c89004c4843 171-194
+  s_91e1a442bbdaf7::t_8486e537d57f9b 113
+Assets/Scripts/Social/Tests/Fixtures/table-reaction-scenarios.json
+  s_91e1a442bbdaf7::t_22dd8468f9bde8 1-7,10-11,30-32,41,54-55,64,77-78,87,101-102,111,126-127,136,150-151,160,174-175,184,197-198,211-212,221,234-235,249-250,259,272-273,287-288,297,312-313,322,335-336,345,358-359,368,381-382,391,404-405,414,427-428,437,450-451,460,474-475,484,498-499,508,524-525,534,549-550,559,572-573,582,595-596,605,618-619,628,642-643,652,665-666,675,689-690,699,715-716,725,738-739,753-754,763,776-777,786,1104-1106
+  s_91e1a442bbdaf7::t_6bab1ec70033c6 8-9,12-29,33-40,42-53,56-63,65-76,79-86,88-100,103-110,112-125,128-135,137-149,152-159,161-173,176-183,185-196,199-210,213-220,222-233,236-248,251-258,260-271,274-286,289-296,298-311,314-321,323-334,337-344,346-357,360-367,369-380,383-390,392-403,406-413,415-426,429-436,438-449,452-459,461-473,476-483,485-497,500-507,509-523,526-533,535-548,551-558,560-571,574-581,583-594,597-604,606-617,620-627,629-641,644-651,653-664,667-674,676-688,691-698,700-714,717-724,726-737,740-752,755-762,764-775,778-785,787-1103
+.gitignore
+  s_91e1a442bbdaf7::t_9c816e840e4670 23-24
+  s_91e1a442bbdaf7::t_d92b8f892c7722 84-90
+Assets/Scripts/Social/UtteranceEvent.cs
+  s_91e1a442bbdaf7::t_09ff9f1f60341d 1-192
+Assets/Scripts/Social/Tests/EventAndValidationTests.cs
+  s_91e1a442bbdaf7::t_79741ff6b27b3e 1-201
+tools/table-reactions-eval/Program.cs
+  s_91e1a442bbdaf7::t_756a884fa781fc 1-102
+Assets/Scripts/Social/ScenarioEvaluator.cs
+  s_91e1a442bbdaf7::t_8d828487348c80 1-181,183-284,287-313
+  s_91e1a442bbdaf7::t_52e94b6d340b8f 182,285-286
+Assets/Scripts/Social/Tests/GateAndPolicyTests.cs
+  s_91e1a442bbdaf7::t_8486e537d57f9b 217-224
+  s_91e1a442bbdaf7::t_2c06dacd8c73d1 1-189,191-193,195-210,212-215,225-234,236-285
+  s_91e1a442bbdaf7::t_1f1023896f3766 190,194,211,216,235
+Assets/Scripts/Xybrid/XybridDialogueProvider.cs
+  s_91e1a442bbdaf7::t_a633161191ce61 26-29,94,103-109,197-199,202
+tools/d1-sidecar/start.sh
+  s_91e1a442bbdaf7::t_739d2c596a427a 1-4,6-16,18-41
+  s_91e1a442bbdaf7::t_4bed96c04e9023 5
+  s_91e1a442bbdaf7::t_b404ddf94acdaf 17
+Assets/Scripts/Social/D1SystemOneJudge.cs
+  s_91e1a442bbdaf7::t_8328db6b14c0d3 1-174,192-213,215-218,221-222,224-227,231,235-236,239-244,246-249,260-323
+  s_91e1a442bbdaf7::t_43bc50f564b462 175-191,214,219-220,223,228-230,232-234,237-238,245,250-259
+Assets/Scripts/TableReactions/XybridGrammarRunner.cs
+  s_91e1a442bbdaf7::t_5fb0adbce184bb 1-71
+Packages/manifest.json
+  s_91e1a442bbdaf7::t_a63f636818fd5f 12
+Assets/Scripts/TableReactions/TableReactionLiveCheck.cs
+  s_91e1a442bbdaf7::t_64d1075733fee2 1-43,46-48,50-53,56-67,70-100,106-111,113-257,260,262-319
+  s_91e1a442bbdaf7::t_38be57bc040f4f 44-45,49,54-55,68-69,101-105,112,258-259,261
+docs/table-reactions.md
+  s_91e1a442bbdaf7::t_6c7e7e4626acdd 35,103,134,155
+  s_91e1a442bbdaf7::t_b5e7abeb35e9d9 175-189,201-203
+  s_91e1a442bbdaf7::t_78a6db66099355 1-34,36-102,104-133,135-154,156-174,190-200
+Assets/Resources/TableReactions/wu_table.json
+  s_91e1a442bbdaf7::t_74dc0a4983eca3 1-154
+tools/table-reactions-eval/TableReactionsEval.csproj
+  s_91e1a442bbdaf7::t_cf63818cce6a81 1-20
+tools/table-reactions-eval/Tests/TableReactionsTests.csproj
+  s_91e1a442bbdaf7::t_0a17516a13d647 1-24
+Assets/Resources/TableReactions.meta
+  s_91e1a442bbdaf7::t_eba9da8ff62f6a 1-8
+Assets/Resources/TableReactions/wu_table.json.meta
+  s_91e1a442bbdaf7::t_65e945371f8242 1-7
+Assets/Scripts/Editor/TableReactionEval.cs.meta
+  s_91e1a442bbdaf7::t_22d44537723c8c 1-2
+Assets/Scripts/Social.meta
+  s_91e1a442bbdaf7::t_919c8c19f3b0e1 1-8
+Assets/Scripts/Social/D1SystemOneJudge.cs.meta
+  s_91e1a442bbdaf7::t_d502fb3da4aa74 1-2
+Assets/Scripts/Social/GemmaStructuredJudge.cs.meta
+  s_91e1a442bbdaf7::t_d45a72bc6b7eac 1-2
+Assets/Scripts/Social/IListenerJudge.cs.meta
+  s_91e1a442bbdaf7::t_02f35f3fc3173b 1-2
+Assets/Scripts/Social/ListenerJudgment.cs.meta
+  s_91e1a442bbdaf7::t_a4102b225b06c1 1-2
+Assets/Scripts/Social/ReactionGate.cs.meta
+  s_91e1a442bbdaf7::t_232e9f8f0459bf 1-2
+Assets/Scripts/Social/ReactionPolicy.cs.meta
+  s_91e1a442bbdaf7::t_b5ac258a7b435a 1-2
+Assets/Scripts/Social/ReactionTrace.cs.meta
+  s_91e1a442bbdaf7::t_c1e36c0fa20805 1-2
+Assets/Scripts/Social/ScenarioEvaluator.cs.meta
+  s_91e1a442bbdaf7::t_99cadaf22012fd 1-2
+Assets/Scripts/Social/TableProfile.cs.meta
+  s_91e1a442bbdaf7::t_3ca1ab6290b6cc 1-2
+Assets/Scripts/Social/Tavern.Social.asmdef.meta
+  s_91e1a442bbdaf7::t_2a31a83643a182 1-7
+Assets/Scripts/Social/Tests.meta
+  s_91e1a442bbdaf7::t_abc1f409e42c6f 1-8
+Assets/Scripts/Social/Tests/EventAndValidationTests.cs.meta
+  s_91e1a442bbdaf7::t_2509426aafa204 1-2
+Assets/Scripts/Social/Tests/Fixtures.meta
+  s_91e1a442bbdaf7::t_ad757f6bd9d5e1 1-8
+Assets/Scripts/Social/Tests/Fixtures/table-reaction-scenarios.json.meta
+  s_91e1a442bbdaf7::t_7a9d3c29c16e89 1-7
+Assets/Scripts/Social/Tests/GateAndPolicyTests.cs.meta
+  s_91e1a442bbdaf7::t_a3db81d27eaf48 1-2
+Assets/Scripts/Social/Tests/JudgeTests.cs.meta
+  s_91e1a442bbdaf7::t_e1d71916687a87 1-2
+Assets/Scripts/Social/Tests/SocialTestSupport.cs.meta
+  s_91e1a442bbdaf7::t_bf69825739322e 1-2
+Assets/Scripts/Social/Tests/Tavern.Social.Tests.asmdef.meta
+  s_91e1a442bbdaf7::t_8709a3c6801a57 1-7
+Assets/Scripts/Social/UtteranceEvent.cs.meta
+  s_91e1a442bbdaf7::t_c79287776876ba 1-2
+Assets/Scripts/TableReactions.meta
+  s_91e1a442bbdaf7::t_20f28a16e4641c 1-8
+Assets/Scripts/TableReactions/FrameTimeProbe.cs.meta
+  s_91e1a442bbdaf7::t_23bb1ba6f0041b 1-2
+Assets/Scripts/TableReactions/ListenerReactionPerformer.cs.meta
+  s_91e1a442bbdaf7::t_db3624508638de 1-2
+Assets/Scripts/TableReactions/TableReactionDirector.cs.meta
+  s_91e1a442bbdaf7::t_97371371956268 1-2
+Assets/Scripts/TableReactions/XybridGrammarRunner.cs.meta
+  s_91e1a442bbdaf7::t_265a0bcb0c578b 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ce9540df43323785d2e2e0fff63433ad4eb099c4",
+  "prompts": {},
+  "sessions": {
+    "s_91e1a442bbdaf7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ce954dfa-b798-49d4-883d-63a9b9ebc91e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
