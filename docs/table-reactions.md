@@ -38,7 +38,11 @@ Dev tooling:
 | **Rules** | aliases + praise/criticism/concern word lists | No pronouns, no negation, no context. |
 | **Off** | existing `TableConversation.WatchDialogue` | Content-blind: listeners watch the addressee, a random one glances at the player every 3–7 s. |
 
-**Why d1 can't run through Xybrid today.** Xybrid 0.16.0's C# binding only exposes text generation
+**Update 2026-11-16:** Xybrid v0.18.0 (2026-11-12) added d1 inference. See [Round 3](#round-3-2026-11-16-d1-through-xybrid-v0190):
+it gives the same labels but takes ~8 s per line on CPU. The paragraph below describes the 0.16.0 state the
+experiment ran on.
+
+**Why d1 couldn't run through Xybrid 0.16.0.** Xybrid 0.16.0's C# binding only exposes text generation
 (`InferenceResult` = text, tool calls, metrics; no logits or choice scores). The Rust core has a
 `ChoiceScorer`, but the FFI refuses such models:
 `crates/xybrid-ffi-facade/src/lib.rs:586-597` `ensure_ffi_supported` → "choice scoring is not available through
@@ -187,6 +191,39 @@ Short summary for the team: [decision-model-vs-gemma.md](decision-model-vs-gemma
   on the holdout (needs the Editor closed for the batch run).
 - Policy: `selfSkipChance` 0.05 (was the global 0.2) and a `*/self/unclear` rule (50% glance at the player).
 
+## Round 3 (2026-11-16): d1 through Xybrid v0.19.0
+
+Xybrid v0.18.0 added d1 inference (`lfm3-d1/text/v1`, PR #748); v0.19.0 is current. Its profile is fixed:
+CPU only, 4 threads, d1-2B **Q4_K_M** (not our Q8_0), one whole-prompt pass per question. It takes the same
+`{state, questions}` JSON our judge already builds. `XybridDecisionJudge` sends exactly the sidecar request and
+runs Xybrid's answers through the same validation.
+
+Measured with the released macOS arm64 CLI (`xybrid-v0.19.0-macos-arm64`, `xybrid run --decision-request`),
+weights from HF `LiquidAI/d1-2B-GGUF` at `e968f657` (sha256 `adca5789…`, matches the SDK pin), M5 Max, frozen
+wording, each set scored once (`Logs/table-reactions-eval/xybrid-cli-{dev,test,holdout}.json`):
+
+| set | judge | referent | meaning | both | attention agrees |
+|---|---|---|---|---|---|
+| test (22) | d1 Q4 via Xybrid, CPU | 82% | **86%** | **68%** | **100%** |
+| test (22) | d1 Q8 via llama.cpp, Metal (2026-11-04) | 82% | 82% | 64% | 90% |
+| holdout (7) | d1 Q4 via Xybrid, CPU | 86% | **71%** | 57% | 88% |
+| holdout (7) | d1 Q8 via llama.cpp, Metal (2026-11-03) | 86% | 57% | 57% | 100% |
+
+No invalid answers, no reaction to any line that should get none (0/12 test, 0/2 holdout).
+
+Speed is the problem. One CLI call per line took 8.4–9.7 s (p50 8.8 s) for 2,118–2,334 input tokens. Timing a
+1-question request (539 tokens) against a 4-question one (2,065 tokens): **about 3.5 ms per prompt token** plus
+about 0.76 s of process start and model load. In the game, with the model loaded once, our 4-question request
+would take **about 8 s per line**, against 0.23–0.31 s on the Metal sidecar. That's at the 8 s expiry, so
+reactions would come far too late. Road Decider's xybrid figure (325 ms for ~92 tokens, M4 Max) fits the same
+3.5 ms/token rate. The cost is the prompt length times the question count, because nothing is shared between
+the per-question passes.
+
+So: Xybrid's d1 is good enough on labels, but too slow for this feature until its profile can use the GPU
+(Metal) or reuse the shared prompt across questions. Shorter state (no persona facts) and fewer questions
+would cut it to 1–2 s but were not tested for accuracy. The Tavern stays on the 0.16.0 checkout; nothing
+was integrated in Unity.
+
 ## Recommendation: revise (keep the d1 path, drop the Gemma baseline)
 
 - d1 interprets clearly better than rules and the dialogue model: referent and meaning at 82%, no reaction
@@ -196,7 +233,8 @@ Short summary for the team: [decision-model-vs-gemma.md](decision-model-vs-gemma
   reaction. Reported speech and negation ("surpassed you", "not a coward", "never stops talking") are its
   weak spots, and those are exactly the provocative lines this feature is for.
 - Gemma-as-judge should not be used for this: wrong referent, ~1.5 s in the scene, and it delays the next reply.
-- Production needs d1 in-process (Xybrid decision API) before it can ship; the sidecar is dev-only.
+- Production needs d1 in-process. Xybrid can run it since v0.18.0, but only on CPU, at about 8 s per line
+  for this request (Round 3). The sidecar stays dev-only.
 
 Next steps: (1) a short human rating pass with the frames-only run; (2) measure d1 through the Xybrid
 decision API once it lands; (3) better tone reading needs a bigger decision model or game-specific

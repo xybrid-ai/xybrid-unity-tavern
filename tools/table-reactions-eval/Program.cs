@@ -28,6 +28,9 @@ internal static class Program
         string url = Arg(args, "--url", "http://127.0.0.1:8187");
         string output = Arg(args, "--out", null);
         bool verbose = Array.IndexOf(args, "--verbose") >= 0;
+        string xybridCli = Arg(args, "--xybrid", null);
+        string modelDir = Arg(args, "--model-dir", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Developer/xybrid-models/d1-2b-q4km"));
 
         string fixturePath = Path.Combine(root, "Assets/Scripts/Social/Tests/Fixtures/table-reaction-scenarios.json");
         string fixtureJson = File.ReadAllText(fixturePath);
@@ -47,6 +50,12 @@ internal static class Program
                 return 2;
             }
             judges.Add(d1);
+        }
+
+        if (judgeArg == "d1xybrid")
+        {
+            if (xybridCli == null) { Console.Error.WriteLine("--xybrid <path to xybrid v0.18+ CLI> is required"); return 2; }
+            judges.Add(new XybridDecisionJudge(new CliDecisionRunner(xybridCli, modelDir)));
         }
 
         Console.WriteLine("fixture " + sha.Substring(0, 12) + " split=" + split + " repeats=" + repeats);
@@ -98,5 +107,57 @@ internal static class Program
         using (var sha = SHA256.Create())
         using (var stream = File.OpenRead(path))
             return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+    }
+}
+
+/// <summary>
+/// Runs each request through <c>xybrid run --decision-request</c>. Every call loads the model again, so wall
+/// time includes loading; the in-process cost has to be estimated from the difference between requests with
+/// different question counts.
+/// </summary>
+internal sealed class CliDecisionRunner : IDecisionRunner
+{
+    private readonly string _cli;
+    private readonly string _modelDir;
+
+    public CliDecisionRunner(string cli, string modelDir)
+    {
+        _cli = cli;
+        _modelDir = modelDir;
+    }
+
+    public string ModelLabel => "d1-2B Q4_K_M via xybrid CLI (lfm3-d1/text/v1, CPU 4 threads)";
+
+    public async Task<DecisionRunResult> RunAsync(string requestJson, CancellationToken cancellationToken)
+    {
+        string file = Path.Combine(Path.GetTempPath(), "tavern-d1-" + Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(file, requestJson);
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(_cli)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            foreach (string a in new[] { "run", "--directory", _modelDir, "--decision-request", file }) psi.ArgumentList.Add(a);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            using (var p = System.Diagnostics.Process.Start(psi))
+            {
+                Task<string> stdout = p.StandardOutput.ReadToEndAsync();
+                Task<string> stderr = p.StandardError.ReadToEndAsync();
+                await p.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                string output = await stdout.ConfigureAwait(false);
+                DecisionRunResult result = p.ExitCode == 0
+                    ? XybridDecisionJudge.ParseCliRecord(output)
+                    : new DecisionRunResult { Error = "exit " + p.ExitCode + ": " + (await stderr.ConfigureAwait(false)).Trim(), Raw = output };
+                result.InferenceMs = sw.Elapsed.TotalMilliseconds;
+                return result;
+            }
+        }
+        finally
+        {
+            File.Delete(file);
+        }
     }
 }

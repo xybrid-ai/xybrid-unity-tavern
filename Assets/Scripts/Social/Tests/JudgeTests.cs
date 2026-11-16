@@ -191,4 +191,89 @@ namespace Tavern.Social.Tests
             Assert.IsFalse(j.Listeners["shara"].AttentionWarranted);
         }
     }
+
+    public class XybridDecisionJudgeTests
+    {
+        // Shape recorded from the xybrid v0.19.0 CLI (`xybrid run --decision-request`) on 2026-11-16, trimmed
+        private const string CliRecord = @"{
+          ""format"": ""xybrid.decision.v1"", ""model_id"": ""d1-2b-q4km"", ""tokens_in"": 2065, ""tokens_out"": 0,
+          ""decisions"": { ""usage"": { ""passes"": 4, ""evaluated_tokens"": 2065 }, ""answers"": [
+            { ""question_id"": ""referent"", ""confidence"": 0.55, ""value"": { ""Choice"": { ""key"": ""varien"" } },
+              ""distribution"": [ { ""key"": ""wu"", ""origin"": ""Caller"", ""probability"": 0.2, ""raw_score"": 9.3 },
+                                  { ""key"": ""shara"", ""origin"": ""Caller"", ""probability"": 0.05, ""raw_score"": 6.2 },
+                                  { ""key"": ""varien"", ""origin"": ""Caller"", ""probability"": 0.55, ""raw_score"": 10.5 },
+                                  { ""key"": ""none"", ""origin"": ""Caller"", ""probability"": 0.1, ""raw_score"": 8.1 },
+                                  { ""key"": ""unclear"", ""origin"": ""Caller"", ""probability"": 0.1, ""raw_score"": ""-Infinity"" } ] },
+            { ""question_id"": ""meaning"", ""confidence"": 0.6, ""value"": { ""Choice"": { ""key"": ""praise"" } },
+              ""distribution"": [ { ""key"": ""praise"", ""origin"": ""Caller"", ""probability"": 0.6, ""raw_score"": 9.3 },
+                                  { ""key"": ""criticism"", ""origin"": ""Caller"", ""probability"": 0.1, ""raw_score"": 7.0 },
+                                  { ""key"": ""concern"", ""origin"": ""Caller"", ""probability"": 0.1, ""raw_score"": 7.0 },
+                                  { ""key"": ""neutral"", ""origin"": ""Caller"", ""probability"": 0.1, ""raw_score"": 7.0 },
+                                  { ""key"": ""unclear"", ""origin"": ""Caller"", ""probability"": 0.1, ""raw_score"": 7.0 } ] },
+            { ""question_id"": ""attention_shara"", ""confidence"": null, ""value"": { ""YesNo"": { ""p_yes"": 0.2 } },
+              ""distribution"": [ { ""key"": ""true"", ""origin"": ""Caller"", ""probability"": 0.2, ""raw_score"": 7.7 },
+                                  { ""key"": ""false"", ""origin"": ""Caller"", ""probability"": 0.8, ""raw_score"": 9.6 } ] },
+            { ""question_id"": ""attention_varien"", ""confidence"": null, ""value"": { ""YesNo"": { ""p_yes"": 0.9 } },
+              ""distribution"": [ { ""key"": ""true"", ""origin"": ""Caller"", ""probability"": 0.9, ""raw_score"": 9.9 },
+                                  { ""key"": ""false"", ""origin"": ""Caller"", ""probability"": 0.1, ""raw_score"": 7.7 } ] } ] } }";
+
+        private sealed class FakeDecisionRunner : IDecisionRunner
+        {
+            public Func<string, DecisionRunResult> Respond;
+            public string ModelLabel => "fake xybrid";
+            public System.Threading.Tasks.Task<DecisionRunResult> RunAsync(string requestJson, CancellationToken cancellationToken)
+                => System.Threading.Tasks.Task.FromResult(Respond(requestJson));
+        }
+
+        private static JudgeRequest Request() => new JudgeRequest(Event("Varien seems disciplined."), Table);
+
+        [Test]
+        public void CliRecord_ConvertsToTheSameValidatedJudgment()
+        {
+            var runner = new FakeDecisionRunner { Respond = _ => XybridDecisionJudge.ParseCliRecord(CliRecord) };
+            JudgeOutcome outcome = Run(new XybridDecisionJudge(runner).JudgeAsync(Request(), CancellationToken.None));
+
+            Assert.IsTrue(outcome.Success, outcome.Failure);
+            Assert.AreEqual("varien", outcome.Judgment.Referent);
+            Assert.AreEqual(SocialMeaning.Praise, outcome.Judgment.Meaning);
+            Assert.IsFalse(outcome.Judgment.Listeners["shara"].AttentionWarranted);
+            Assert.IsTrue(outcome.Judgment.Listeners["varien"].AttentionWarranted);
+            Assert.AreEqual(2065, outcome.InputTokens);
+        }
+
+        [Test]
+        public void Request_IsTheSameJsonTheSidecarGets()
+        {
+            string sent = null;
+            var runner = new FakeDecisionRunner { Respond = json => { sent = json; return XybridDecisionJudge.ParseCliRecord(CliRecord); } };
+            Run(new XybridDecisionJudge(runner).JudgeAsync(Request(), CancellationToken.None));
+            Assert.AreEqual(D1SystemOneJudge.BuildRequest(Request()).ToString(Newtonsoft.Json.Formatting.None), sent);
+        }
+
+        [Test]
+        public void MissingOrForeignAnswers_AreRejected()
+        {
+            DecisionRunResult missing = XybridDecisionJudge.ParseCliRecord(CliRecord);
+            missing.Answers.RemoveAt(3);
+            Assert.IsFalse(Run(new XybridDecisionJudge(new FakeDecisionRunner { Respond = _ => missing })
+                .JudgeAsync(Request(), CancellationToken.None)).Success, "missing attention_varien");
+
+            DecisionRunResult foreign = XybridDecisionJudge.ParseCliRecord(CliRecord);
+            foreign.Answers[0].QuestionId = "mood";
+            Assert.IsFalse(Run(new XybridDecisionJudge(new FakeDecisionRunner { Respond = _ => foreign })
+                .JudgeAsync(Request(), CancellationToken.None)).Success, "answer to a question nobody asked");
+
+            Assert.IsFalse(XybridDecisionJudge.ParseCliRecord("{\"format\":\"other\"}").Success);
+            Assert.IsFalse(XybridDecisionJudge.ParseCliRecord("not json").Success);
+        }
+
+        [Test]
+        public void RunnerFailure_BecomesAFailedOutcome()
+        {
+            var runner = new FakeDecisionRunner { Respond = _ => new DecisionRunResult { Error = "model not loaded" } };
+            JudgeOutcome outcome = Run(new XybridDecisionJudge(runner).JudgeAsync(Request(), CancellationToken.None));
+            Assert.IsFalse(outcome.Success);
+            StringAssert.Contains("model not loaded", outcome.Failure);
+        }
+    }
 }

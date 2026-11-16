@@ -74,9 +74,12 @@ missed reactions (rules: 57% / 71%, 4 of 6 needed reactions missed). We didn't s
 
 ## Constraints
 
-- **d1 can't run inside the game through Xybrid yet.** The Xybrid SDK (0.16) rejects models that score
-  choices instead of generating text. Decision-model support exists only on unmerged SDK branches. Until it
-  ships, d1 needs a separate local process, which is fine for development but not for a product.
+- **d1 runs through Xybrid now, but too slowly for this.** Xybrid v0.18.0 (2026-11-12) added d1. On
+  2026-11-16 we ran the same 22 test sentences through the v0.19.0 CLI. Labels were as good as the sidecar's
+  (right person 82%, right tone 86%), but each line took about 8 s on the CPU, against about 0.25 s on the GPU
+  sidecar. Xybrid's d1 profile is CPU-only and reads the whole prompt once per question, so the game would
+  need a GPU profile or prompt reuse first. Until then, d1 in the game still needs the separate local
+  process, which is fine for development but not for a product.
 - **Small evidence base.** 22 + 7 sentences, one table, one machine (M5 Max), one live run in the Editor. We
   have no human rating of how natural the reactions look yet.
 
@@ -86,6 +89,6 @@ Use a decision model, not the dialogue LLM, for this kind of judgment. It was mo
 interpretation measure, never reacted to unrelated speech, and doesn't compete with the NPC's own replies.
 Next steps:
 
-1. Run d1 inside the game through Xybrid's decision API when it lands, and re-measure on device.
+1. Ask for a GPU (Metal) or shared-prompt d1 profile in Xybrid, then move the game onto it and re-measure.
 2. Rate the reactions by eye in the scene.
 3. Improve tone reading, either with a larger decision model or with a few examples from this game.
