@@ -1,0 +1,30 @@
+tools/table-reactions-eval/Program.cs
+  s_91e1a442bbdaf7::t_c58c553d1b39cf 31-33,55-60,112-162
+  s_91e1a442bbdaf7::t_3b292437973b39 163
+Assets/Scripts/Social/Tests/JudgeTests.cs
+  s_91e1a442bbdaf7::t_8a61fe7353fcf2 194-278
+docs/decision-model-vs-gemma.md
+  s_91e1a442bbdaf7::t_634fc8d09d30ea 77-82,92
+Assets/Scripts/Social/XybridDecisionJudge.cs.meta
+  s_91e1a442bbdaf7::t_478b459122fb6d 1-2
+Assets/Scripts/Social/XybridDecisionJudge.cs
+  s_91e1a442bbdaf7::t_8935bd878e9c23 1-224
+docs/table-reactions.md
+  s_91e1a442bbdaf7::t_634fc8d09d30ea 41-45,194-226,236-237
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "9230fdf9dcd00345a3d023da28fe9b6871e2a9da",
+  "prompts": {},
+  "sessions": {
+    "s_91e1a442bbdaf7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ce954dfa-b798-49d4-883d-63a9b9ebc91e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
