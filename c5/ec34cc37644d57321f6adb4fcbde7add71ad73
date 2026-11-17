@@ -1,0 +1,74 @@
+Assets/Scripts/TableReactions/TableReactionLiveCheck.cs
+  s_91e1a442bbdaf7::t_09298bf09099f5 280
+Assets/Scripts/TableReactions/TableReactionBlindTest.cs
+  s_91e1a442bbdaf7::t_86fda1dadd5e69 153,214-218,580,635,644,715
+  s_91e1a442bbdaf7::t_ea2a2840b406c7 211-213,219-222,226-233
+  s_91e1a442bbdaf7::t_fe40cdfe9cb921 1-34,36-152,154-210,223-225,234-579,581-634,636-643,645-714,716-782
+  s_91e1a442bbdaf7::t_9624ecd2a56df2 35
+docs/decision-model-vs-gemma.md
+  s_91e1a442bbdaf7::t_503b117ad67721 83-103,112
+Assets/Scripts/Editor/TableReactionMenu.cs
+  s_91e1a442bbdaf7::t_88be145e862c6b 43-55
+Assets/Scripts/NPCAwareness.cs
+  s_91e1a442bbdaf7::t_64903284c4df8d 55-57,269-275
+  s_91e1a442bbdaf7::t_9b3001741363ed 276
+Assets/Scripts/Xybrid/DialogueManagerV2.cs
+  s_91e1a442bbdaf7::t_1fc1110daf3562 523-542,545,557,560,814-815,818
+  s_91e1a442bbdaf7::t_1911f798dd8880 74-82,410,1095
+docs/table-reactions.md
+  s_91e1a442bbdaf7::t_b912fbb29e129d 314-339
+  s_91e1a442bbdaf7::t_8fcd9fa00faa51 16
+  s_91e1a442bbdaf7::t_721309e7808d7f 273-313,340
+  s_91e1a442bbdaf7::t_6b7aa64f4dc4a4 341-372
+  s_91e1a442bbdaf7::t_2bffea0402f1ca 237-272
+Assets/Scripts/NPCGestures.cs
+  s_91e1a442bbdaf7::t_1fc1110daf3562 73-76,115
+  s_91e1a442bbdaf7::t_5af3302a80f5f3 18-20,149
+  s_91e1a442bbdaf7::t_e9022f83ff4d56 1,48-51,93-99,179-185,214-236
+  s_91e1a442bbdaf7::t_314d41ebea1554 237-238
+Assets/Scripts/Social/Tests/BlindContingencyTests.cs
+  s_91e1a442bbdaf7::t_4e3ef6e709092b 1-94
+Assets/Scripts/Social/ReactionPolicy.cs
+  s_91e1a442bbdaf7::t_5af3302a80f5f3 188-189
+Assets/Scripts/NPCIdleLife.cs
+  s_91e1a442bbdaf7::t_64903284c4df8d 26-28,151-152
+  s_91e1a442bbdaf7::t_89c62480f77494 153
+Assets/Scripts/Social/TableProfile.cs
+  s_91e1a442bbdaf7::t_5af3302a80f5f3 33,229
+Assets/Scripts/TableReactions/ListenerReactionPerformer.cs
+  s_91e1a442bbdaf7::t_5af3302a80f5f3 82-83,117
+Assets/Scripts/TableConversation.cs
+  s_91e1a442bbdaf7::t_7a863161bb06b2 45-48,80-82,94,122,140,220-221,223-237,434,469,482,486,488
+  s_91e1a442bbdaf7::t_6296d6b4364fdd 222
+Assets/Scripts/Social/BlindContingency.cs
+  s_91e1a442bbdaf7::t_01f94692aa249f 1-136
+Assets/Scripts/NPCFace.cs
+  s_91e1a442bbdaf7::t_1fc1110daf3562 464-484,1016,1058,1060,1070
+Assets/Resources/TableReactions/wu_table.json
+  s_91e1a442bbdaf7::t_09cd9f21f946be 43-44,49,51-53,55,57,59,63-64,66-68,70-71,76-77,80,86,88,90,93,96,99-101,105,108,110-111,121
+  s_91e1a442bbdaf7::t_b98b442aa47373 47-48,56,62,73,84-85,89,92,103-104,107,113-114,117
+Assets/Scripts/TableReactions/TableReactionDirector.cs
+  s_91e1a442bbdaf7::t_09298bf09099f5 23-24,84-108,153,176-186,188,196,206,590
+Assets/Scripts/Social/BlindContingency.cs.meta
+  s_91e1a442bbdaf7::t_7bd1ab1b8406e3 1-2
+Assets/Scripts/Social/Tests/BlindContingencyTests.cs.meta
+  s_91e1a442bbdaf7::t_44cb1e65a228fd 1-2
+Assets/Scripts/TableReactions/TableReactionBlindTest.cs.meta
+  s_91e1a442bbdaf7::t_9f8e9242aa63e7 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c5ec34cc37644d57321f6adb4fcbde7add71ad73",
+  "prompts": {},
+  "sessions": {
+    "s_91e1a442bbdaf7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ce954dfa-b798-49d4-883d-63a9b9ebc91e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
