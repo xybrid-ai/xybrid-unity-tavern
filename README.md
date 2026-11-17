@@ -40,12 +40,33 @@ The original local orc files remain in this working project for continuity;
 new orc work belongs in the standalone repository. Tavern files and the
 standalone project's files are independent.
 
+## Telemetry (optional)
+
+Xybrid telemetry is off unless an API key is configured. Without one, models
+load normally. The key is never stored in scenes, prefabs or assets.
+
+- **Editor:** open **Unity > Settings > Xybrid Tavern > Telemetry** (Windows:
+  **Edit > Preferences**), paste the key into the masked **API Key** field, or
+  press **Clear** to remove it. The key is saved in Unity EditorPrefs on this
+  machine, scoped to this project's folder, outside the project files.
+  EditorPrefs are plain local configuration, not encrypted secret storage. A
+  saved key takes precedence. Otherwise the Editor reads `xybrid_api_key` from
+  the project-root `.env` (ignored by Git), then from the process environment.
+- **Player builds:** set the `xybrid_api_key` environment variable for the
+  player process. Builds never contain or read the Editor key.
+
+The key takes effect the next time `XybridModelService` initializes, for
+example when you enter Play mode. Telemetry log lines do not include the key,
+configured values or SDK exception messages.
+
 ## Distribution
 
-Run `python3 tools/check_repository.py` before committing source. Do not publish
-full Unity project ZIPs or raw paid assets. Previous full-project release ZIPs
-are legacy artifacts and need a separate content audit; this change does not
-remove or certify them. See `RELEASING.md` for the current policy.
+Run `python3 tools/check_repository.py` before committing source. It also
+rejects credential-shaped values and the removed `_telemetryApiKeyEnvVar`
+serialized field. Do not publish full Unity project ZIPs or raw paid assets.
+Previous full-project release ZIPs are legacy artifacts and need a separate
+content audit; this change does not remove or certify them. See `RELEASING.md`
+for the current policy, including the release ZIP scan.
 
 The repository license covers project-owned code, not purchased art, third-party
 models, voice data or other local dependencies.

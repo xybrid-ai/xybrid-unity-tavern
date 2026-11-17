@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Tavern.Telemetry;
 using UnityEngine;
 using Xybrid;
 using Xybrid.ModelAsset;
@@ -29,9 +30,10 @@ namespace Tavern.Dialogue
         [Header("Settings")]
         [SerializeField] private bool _persistAcrossScenes = true;
 
-        [Header("Telemetry (optional)")]
-        [Tooltip("Env var name holding the telemetry API key. Read from project-root .env in Editor, or process env in builds. Leave empty to disable.")]
-        [SerializeField] private string _telemetryApiKeyEnvVar = "xybrid_api_key";
+        // Telemetry is optional and configured outside serialized data:
+        // Preferences > Xybrid Tavern > Telemetry (Editor), else .env / the
+        // xybrid_api_key environment variable. See TelemetryApiKey.
+        private bool _telemetryActive;
 
         // Legacy fallback — kept for backward compat with existing scenes
         [SerializeField, HideInInspector] private string _modelId;
@@ -577,18 +579,25 @@ namespace Tavern.Dialogue
         // Telemetry
         // ================================================================
 
+        // Logs here stay generic: never the key, a configured value or a raw
+        // exception message (SDK errors can echo request details).
         private void TryInitializeTelemetry()
         {
-            if (string.IsNullOrWhiteSpace(_telemetryApiKeyEnvVar))
+            string apiKey;
+            TelemetryKeySource source;
+            try
             {
-                Debug.Log("[XybridModelService] Telemetry disabled (no API key env var configured).");
+                apiKey = TelemetryApiKey.Resolve(DotEnv.Get, out source);
+            }
+            catch (Exception)
+            {
+                Debug.LogWarning("[XybridModelService] Telemetry disabled: the API key configuration could not be read.");
                 return;
             }
 
-            string apiKey = DotEnv.Get(_telemetryApiKeyEnvVar);
-            if (string.IsNullOrWhiteSpace(apiKey))
+            if (apiKey == null)
             {
-                Debug.LogWarning($"[XybridModelService] Telemetry disabled: '{_telemetryApiKeyEnvVar}' not found in .env or environment.");
+                Debug.Log("[XybridModelService] Telemetry disabled: no API key configured.");
                 return;
             }
 
@@ -601,11 +610,12 @@ namespace Tavern.Dialogue
                 {
                     XybridClient.InitializeTelemetry(config);
                 }
-                Debug.Log("[XybridModelService] Telemetry initialized → ingest.xybrid.dev");
+                _telemetryActive = true;
+                Debug.Log($"[XybridModelService] Telemetry initialized (key source: {source}).");
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Debug.LogError($"[XybridModelService] Telemetry init failed: {ex.Message}");
+                Debug.LogWarning("[XybridModelService] Telemetry disabled: initialization failed. Models load without it.");
             }
         }
 
@@ -615,13 +625,17 @@ namespace Tavern.Dialogue
 
         private void OnApplicationPause(bool paused)
         {
-            if (paused) XybridClient.FlushTelemetry();
+            if (paused && _telemetryActive) XybridClient.FlushTelemetry();
         }
 
         private void OnDestroy()
         {
-            XybridClient.FlushTelemetry();
-            XybridClient.ShutdownTelemetry();
+            if (_telemetryActive)
+            {
+                XybridClient.FlushTelemetry();
+                XybridClient.ShutdownTelemetry();
+                _telemetryActive = false;
+            }
 
             foreach (var entry in _models.Values)
                 entry.Model?.Dispose();
