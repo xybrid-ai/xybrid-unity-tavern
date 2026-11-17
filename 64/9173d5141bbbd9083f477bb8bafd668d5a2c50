@@ -1,0 +1,63 @@
+tools/tests/test_check_repository.py
+  s_a7f569c880f4e4::t_0336473edce952 1-124,126-150
+  s_a7f569c880f4e4::t_73096655855166 125
+Assets/Scripts/Telemetry/TelemetryEditorPreferences.cs
+  s_a7f569c880f4e4::t_7484e53e9dacb8 1-73
+Assets/Scripts/Xybrid/XybridModelService.cs
+  s_a7f569c880f4e4::t_5259c814ea700f 582-583,586-592,594,598,600,613-614,616,618,628,633-638
+  s_a7f569c880f4e4::t_d959f3b6241f11 33-36
+  s_a7f569c880f4e4::t_ddf9e1897d6814 5
+Assets/Scripts/Telemetry/Tavern.Telemetry.asmdef
+  s_a7f569c880f4e4::t_798d8469a4da1a 1-14
+Assets/Scripts/Telemetry/Tests/TelemetryApiKeyTests.cs
+  s_a7f569c880f4e4::t_f8a1ed9c042456 1-159
+tools/check_repository.py
+  s_a7f569c880f4e4::t_d6656060adb3ac 140
+  s_a7f569c880f4e4::t_d3163a74421b7b 40
+  s_a7f569c880f4e4::t_8a7fa76e6a625a 2-10,12-13,16,20-39,41-97,99-112,126-127,141-142,146-205
+  s_a7f569c880f4e4::t_320961bc99cd1a 206-207
+RELEASING.md
+  s_a7f569c880f4e4::t_591fdbfd5a79f7 6-34
+Assets/Scripts/Telemetry/Tests/Tavern.Telemetry.Tests.asmdef
+  s_a7f569c880f4e4::t_a0665b5e875368 1-24
+Assets/Scripts/Editor/TelemetryPreferencesProvider.cs
+  s_a7f569c880f4e4::t_f86ee64c4543b5 1-66
+Assets/Scripts/Telemetry/TelemetryApiKey.cs
+  s_a7f569c880f4e4::t_d259ad0c924928 1-71
+README.md
+  s_a7f569c880f4e4::t_164f211d8254a0 43-61,64-69
+.github/workflows/source-policy.yml
+  s_a7f569c880f4e4::t_9eb6c1247c6937 12
+Assets/Scripts/Editor/TelemetryPreferencesProvider.cs.meta
+  s_a7f569c880f4e4::t_e60edd69dc544d 1-2
+Assets/Scripts/Telemetry.meta
+  s_a7f569c880f4e4::t_6e68b2a4a2f51a 1-8
+Assets/Scripts/Telemetry/Tavern.Telemetry.asmdef.meta
+  s_a7f569c880f4e4::t_077b36340d8b93 1-7
+Assets/Scripts/Telemetry/TelemetryApiKey.cs.meta
+  s_a7f569c880f4e4::t_0c21922ea29f0a 1-2
+Assets/Scripts/Telemetry/TelemetryEditorPreferences.cs.meta
+  s_a7f569c880f4e4::t_64ab9320f19005 1-2
+Assets/Scripts/Telemetry/Tests.meta
+  s_a7f569c880f4e4::t_38c158c313c96d 1-8
+Assets/Scripts/Telemetry/Tests/Tavern.Telemetry.Tests.asmdef.meta
+  s_a7f569c880f4e4::t_31c2310f8f9ded 1-7
+Assets/Scripts/Telemetry/Tests/TelemetryApiKeyTests.cs.meta
+  s_a7f569c880f4e4::t_091b69fe5a698a 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "649173d5141bbbd9083f477bb8bafd668d5a2c50",
+  "prompts": {},
+  "sessions": {
+    "s_a7f569c880f4e4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aeafb690-d099-41d8-9482-16c3882b5f36",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
