@@ -13,6 +13,7 @@ Status: working, toggleable prototype. Results and recommendation at the end.
    `tools/d1-sidecar/start.sh` (port 8187; reuses space-jarv's pinned llama.cpp + d1 GGUF).
 2. Play `demo_xybrid`, walk to the corner table and talk to Master Wu (E).
 3. **F3** cycles the mode: `Off` → `Rules` → `D1Sidecar` → `GemmaBaseline`. **F4** toggles the overlay.
+   **F6** runs the blind test ([below](#blind-test-can-the-player-tell-2026-11-16)).
 4. Overlay (top-right) shows per line: session/turn, who could hear it, judge + model, status, queue/inference
    time, what each listener's interpretation was, what the policy asked for, and what the animation systems
    accepted. Same data in the Console (`[TableReactions]`) and `Logs/table-reactions.jsonl` (also `reply`
@@ -232,6 +233,142 @@ pass felt the "same" as the Off pass. At the authored intensities (faces 0.3–0
 reaction is hard to tell apart from the watcher's random glances. Interpretation is no longer the
 bottleneck; how visible the reaction is, is. Next: a blind test of whether a player can tell which line a
 character reacted to.
+
+## Blind test: can the player tell? (2026-11-16)
+
+The question is no longer "did d1 label the line right" but "can a player tell that the table reacts to what
+they said". The watcher already glances at the player at random, so a liveliness rating can't separate the
+modes. The blind test measures **perceived contingency** instead.
+
+**Run it:** start the sidecar (`tools/d1-sidecar/start.sh`), enter Play mode, maximize the Game view, press
+**F6** (or `Tavern > Table Reactions > Blind Test`), then **Y** to start. About 4 minutes. F6 again cancels;
+answers so far are kept.
+
+**Procedure** (`TableReactionBlindTest`, scoring in `Tavern.Social.BlindContingency`, EditMode-tested):
+
+- The test places the player in front of Master Wu, opens the conversation and says 16 fixed lines for the
+  player: 8 remarks about someone at the table and 8 small talk. The remarks come from the scenario fixtures
+  where d1 already got the person and tone right and the policy planned a visible reaction. This isolates
+  visibility from accuracy.
+- Each line runs under a hidden condition: Off (the old content-blind watcher) or d1. The assignment is random
+  but balanced: each condition gets 4 remarks and 4 small-talk lines. The overlay and the `[TableReactions]`
+  Console lines are off for the run.
+- Each line is shown 1.5 s before it is said. After 2.5 s the player answers: Y = "Shara or Varien responded
+  to what I just said", N = no.
+- **Score** per condition = the share of Y after remarks minus the share of Y after small talk, in points from
+  −100 to +100. Content-blind behaviour sits near 0 however lively it looks. A reaction a player can read
+  scores clearly above 0.
+- **Reaction size** is measured for each listener over the 6 s after each line: the largest head rotation
+  relative to the body (degrees), the largest change of any face blend shape away from the resting mood
+  (`NPCFace.ExpressionShiftFromBase`, %), gestures played, and where they looked. It also records whether the
+  judge and policy planned a reaction (from the trace).
+- Output: `Logs/table-reactions-blind/<utc>/` (`trials.jsonl`, `results.json`, `summary.md`). The reveal pools
+  all runs with the same `ReactionStyle` constant and policy-file hash, so before/after runs stay separate.
+  Bump `ReactionStyle` whenever the way reactions are performed changes.
+
+**Why expect a low score at the current style:** most planned reactions are a 1.2–2 s look at the player,
+which is the same action as the watcher's random glance. Transient faces at 0.3–0.5 replace a resting mood
+that is already at 0.3–0.5 strength, so the visible change is small.
+
+### Run 1: human, style `v1-subtle` (2026-11-17)
+
+One player, one full run (`Logs/table-reactions-blind/20261117-124106/`) plus an earlier attempt stopped
+after 8 answered lines (`20261117-122444/`, trials only).
+
+| condition | yes after remarks | yes after small talk | score |
+| --- | --- | --- | --- |
+| Off, full run | 2/4 | 2/4 | +0 |
+| d1, full run | 4/4 | 3/4 | +25 |
+| Off, both runs pooled | 3/5 | 3/5 | +0 |
+| d1, both runs pooled | 6/7 | 5/7 | +14 |
+
+- Off scored 0 as expected. d1 was answered "yes" after nearly every remark, but also after most small talk,
+  so the score stays small. With 4–7 lines per cell, +25 and +14 can't be told apart from 0 (Fisher exact,
+  full run: p = 1.0). It's a baseline, not evidence for or against d1.
+- The player's account: Shara, Varien and other characters such as Greta "periodically look at me, so it's
+  hard to know when Varien and Shara look at me because of the line". The sizes agree: a look at the player
+  followed 3 of 4 d1 small-talk lines, where d1 planned nothing. Three content-blind sources produce those
+  looks: the table watcher's random glance (`TableConversation.WatchDialogue`), `NPCAwareness` glances while
+  the player talks to someone else, and `NPCIdleLife` glances at the player.
+- One moment "stood out where Shara seemed to have laughed". The only expression d1 adds is the face: 26%
+  change after d1 remarks against 0% for everything else. Shara's planned faces after praise of her were
+  Delighted 0.45 and Happy 0.5 with a nod.
+
+### Style `v2-strong` (2026-11-17)
+
+Changes, so that a reaction differs from ambient life in channel and timing:
+
+1. **Quiet after the player's line.** For 7 s after each player line, nobody starts a random look at the
+   player: the table watcher (`TableConversation`, which also ends a glance already in progress),
+   `NPCAwareness` and `NPCIdleLife` while the player is in someone else's conversation. Each has a
+   `quietAfterPlayerLine` field (0 = off). `DialogueManagerV2.PlayerSpokeWithin(seconds)` supplies the timing.
+   This applies in every mode, Off included, so the blind test still compares the same ambient behaviour with
+   and without d1. Quieting alone can't raise the score: it removes looks after remarks and small talk alike.
+2. **Stronger reactions.** Faces at 0.6–0.85 instead of 0.3–0.5, held 2.2–3.2 s. Most options add a gesture.
+   Gaze lasts 1.6–2.6 s.
+3. **Laugh.** The controller's seated laugh (`Laugh` trigger, posture 1, previously unused) is now
+   `NPCGesture.Laugh` and the policy gesture `laugh`. Shara's top reaction to praise of her is to laugh with a
+   Delighted face. The clip runs 8.3 s, so `NPCGestures` fades back to the previous pose after
+   `maxLaughSeconds` (3 s). Otherwise she would still be laughing through the next line. `NPCGestures` now
+   also treats a trigger as taken when any layer consumes it, because the laugh plays on the Base Layer.
+4. **Expressions that differ from the resting face.** Shara rests at Happy 0.45 and Varien at Worried 0.40,
+   so a Happy reaction on Shara or a Worried one on Varien barely shows. Measured in Play mode as the peak
+   `ExpressionShiftFromBase` over 2 s:
+
+   | listener | expression | change from rest |
+   | --- | --- | --- |
+   | Shara | Happy 0.8 | 26% |
+   | Shara | Delighted 0.8 | 42% |
+   | Shara | Worried 0.8 | 66% |
+   | Shara | Surprised 0.8 | 80% |
+   | Varien | Worried 0.75 / 0.9 | 29% / 42% |
+   | Varien | Surprised 0.65 | 47% |
+   | Varien | Happy 0.75 | 56% |
+   | Varien | Sad 0.8 | 61% |
+
+   Shara's Happy options became Delighted. Varien deflects praise with a bashful smile (Happy) and reacts
+   to criticism with Sad or Surprised. He keeps Worried, at 0.9, only for concern about someone else.
+5. `ReactionStyle` = `v2-strong`. The v1 policy hash was `a80c891b`.
+
+**Automated smoke run, v2 (scripted answers, so its scores mean nothing; 2026-11-17 12:57Z).** Looks at
+the player within 6 s of a line went from 14 of 16 lines (v1 smoke) to **1 of 16**: the one d1 planned
+("That loud girl…", Shara looks up hurt, face change 67%). The other executed d1 reaction was "Shara told
+me Varien is the best fighter she knows": Varien glanced away and Shara nodded at him. d1 labelled all four
+remarks correctly, but the policy chose "nothing" on two of them by chance. The chances: authored 30% for
+Shara on praise of Wu, the 20% skip chance, and the 5% skip chance for a remark about the listener. The
+smoke run predates the expression change in item 4.
+
+### Run 2: human, style `v2-strong` (2026-11-17 13:06Z)
+
+Same player, one full run (`Logs/table-reactions-blind/20261117-130559/`, policy hash `f6d26325`).
+
+| condition | yes after remarks | yes after small talk | score |
+| --- | --- | --- | --- |
+| Off | 1/4 | 0/4 | +25 |
+| d1 | 3/4 | 0/4 | **+75** |
+| *d1 in run 1 (v1-subtle), for comparison* | *4/4* | *3/4* | *+25* |
+
+- **Small talk no longer produces false alarms**: 0 of 8 yes, against 5 of 8 in run 1. The 7 s quiet window
+  removed the random looks that the player had been reading as reactions.
+- **The player saw every reaction d1 executed.** d1 performed one on 3 of its 4 remarks, and the player
+  said yes to exactly those 3, answering within 3.3–7.2 s. On the fourth remark ("Your students are lucky to
+  have you"), d1 labelled it praise of Wu, and the policy chose nothing for both listeners. That happens about
+  21% of the time on praise of the addressee. The player said no.
+- Over all 16 lines, "yes" followed 3 of 3 executed reactions and 1 of 13 lines with no reaction (Fisher
+  exact, one-sided, p ≈ 0.007). The one exception was an Off line about Shara, answered after 22 s with no
+  measured movement. That looks like a guess from the content of the line.
+- The d1 versus Off gap itself rests on 4 lines per cell (one-sided p ≈ 0.07 for d1's 3/4 versus 0/4). The
+  direction is clear, but one player and one run are not a proof.
+- Executed reactions: Varien looked up, shook his head and showed Surprised (face change 48%) at being called
+  the most disciplined. Shara turned to Varien looking Worried (62%) while Varien looked up Surprised at "your
+  quiet student looks nervous". Varien glanced away with a Sad face (45%) at "Varien looks exhausted". None of
+  the three lines needed the laugh.
+
+**Conclusion.** d1's labels were right on every remark in all three blind runs. The bottleneck was the
+performance layer. In run 1, ambient life used the same channel (gaze) at random times, and reactions pushed
+each face toward the emotion it already showed. Once the window after the player's line is kept clear and
+each reaction contrasts with the character's resting face, a player picks out d1's reactions reliably and
+doesn't imagine any after small talk.
 
 ## Recommendation: revise (keep the d1 path, drop the Gemma baseline)
 

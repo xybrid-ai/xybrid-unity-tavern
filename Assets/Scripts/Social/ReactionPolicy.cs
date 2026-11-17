@@ -185,7 +185,8 @@ namespace Tavern.Social
             {
                 if (o.Face != null) return true;
                 if (o.Gaze != GazeKind.None && ResolveTarget(o.Gaze, listener, interpretation.Referent, e) != null) return true;
-                if (o.Gesture == ReactionGesture.Nod || o.Gesture == ReactionGesture.Shake || o.Gesture == ReactionGesture.GlanceAway) return true;
+                if (o.Gesture == ReactionGesture.Nod || o.Gesture == ReactionGesture.Shake ||
+                    o.Gesture == ReactionGesture.GlanceAway || o.Gesture == ReactionGesture.Laugh) return true;
                 if (o.Gesture == ReactionGesture.GlanceToReferent &&
                     ResolveTarget(GazeKind.Referent, listener, interpretation.Referent, e) != null) return true;
             }

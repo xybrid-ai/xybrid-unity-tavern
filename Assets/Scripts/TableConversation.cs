@@ -42,6 +42,10 @@ public class TableConversation : MonoBehaviour
     [Tooltip("Seconds after the player's dialogue with a member ends before the table resumes chatting.")]
     [Min(0f)] [SerializeField] private float resumeDelay = 2f;
 
+    [Tooltip("Seconds after each player line in which listeners don't sneak looks at the player, so a look " +
+             "in that window (a table reaction) reads as a response to what was said. 0 = off.")]
+    [Min(0f)] [SerializeField] private float quietAfterPlayerLine = 7f;
+
     // Turn texture (kept out of the Inspector to keep it focused)
     private const float AddresseeSwitchChance = 0.45f;     // speaker turns to another listener mid-turn
     private const float ListenerSideGlanceChance = 0.25f;  // a listener briefly looks at another listener
@@ -73,6 +77,9 @@ public class TableConversation : MonoBehaviour
 
         // A table reaction is playing: skip this member for the watch loop's random player glance
         public float GlanceSuppressedUntil;
+
+        // The watch loop's random player glance runs until this time
+        public float PlayerGlanceUntil;
     }
 
     private enum Mode { Idle, Chatting, Resuming, WatchingDialogue }
@@ -84,6 +91,7 @@ public class TableConversation : MonoBehaviour
     private int _lastAddressee = -1;
     private int _currentSpeaker = -1;
     private int _currentAddressee = -1;
+    private Transform _watchFocus;
 
     /// <summary>True while the turn-taking loop runs (false while paused for, or resuming after, player dialogue).</summary>
     public bool IsChatting => _mode == Mode.Chatting;
@@ -111,6 +119,7 @@ public class TableConversation : MonoBehaviour
     {
         DialogueManagerV2.DialogueStarted += OnDialogueStarted;
         DialogueManagerV2.DialogueEnded += OnDialogueEnded;
+        DialogueManagerV2.PlayerUtteranceSubmitted += OnPlayerLine;
 
         // The first enable is handled by Start, once members are cached
         if (_initialized)
@@ -128,6 +137,7 @@ public class TableConversation : MonoBehaviour
     {
         DialogueManagerV2.DialogueStarted -= OnDialogueStarted;
         DialogueManagerV2.DialogueEnded -= OnDialogueEnded;
+        DialogueManagerV2.PlayerUtteranceSubmitted -= OnPlayerLine;
 
         // Disabling a component does not stop its coroutines on its own
         StopAllCoroutines();
@@ -205,6 +215,24 @@ public class TableConversation : MonoBehaviour
         if (!_initialized || IndexOf(npc) < 0) return;
 
         StartChatLoop(resumeDelay, resuming: true);
+    }
+
+    // The player just spoke: a random glance at them that is still running would read as a reaction to
+    // the line, so it ends now and the listener goes back to watching the exchange
+    private void OnPlayerLine(DialogueManagerV2.DialogueLineInfo line)
+    {
+        if (_mode != Mode.WatchingDialogue || quietAfterPlayerLine <= 0f) return;
+
+        for (int i = 0; i < _members.Count; i++)
+        {
+            Member member = _members[i];
+            if (Time.time >= member.PlayerGlanceUntil) continue;
+            member.PlayerGlanceUntil = 0f;
+            if (member.LookAt == null) continue;
+            member.LookAt.ClearLookTarget(LookPriority.Ambient);
+            if (IsAvailable(i))
+                SetSocialLook(member, _watchFocus);
+        }
     }
 
     // ================================================================
@@ -403,6 +431,7 @@ public class TableConversation : MonoBehaviour
     {
         Member addressed = _members[addressedIndex];
         Transform focus = addressed.Head;
+        _watchFocus = focus;
 
         ClearPendingLooks();
 
@@ -437,6 +466,7 @@ public class TableConversation : MonoBehaviour
 
             Member member = _members[watcher];
             if (Time.time < member.GlanceSuppressedUntil) continue;
+            if (DialogueManagerV2.PlayerSpokeWithin(quietAfterPlayerLine)) continue;
             Transform eyes = member.LookAt != null ? member.LookAt.PlayerEyes : null;
             if (eyes == null) continue;
 
@@ -449,11 +479,13 @@ public class TableConversation : MonoBehaviour
             float glance = RandomIn(PlayerGlanceDuration);
             member.LookAt.ClearLookTarget(LookPriority.Social);
             member.LookAt.LookAtFor(eyes, glance, LookPriority.Ambient);
+            member.PlayerGlanceUntil = Time.time + glance;
 
             yield return new WaitForSeconds(glance);
 
-            if (IsAvailable(watcher))
+            if (IsAvailable(watcher) && member.PlayerGlanceUntil > 0f)
                 SetSocialLook(member, focus);
+            member.PlayerGlanceUntil = 0f;
         }
     }
 

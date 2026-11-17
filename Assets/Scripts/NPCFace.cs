@@ -461,6 +461,27 @@ public class NPCFace : MonoBehaviour
         ClearSpeech();
     }
 
+    private float[] _baseScratch;
+
+    /// <summary>
+    /// Dev measurement: how far the expression layer is from the resting mood right now, as the largest change of
+    /// any blend shape (0-1). Leaves out blinks, speech, idle motion and gestures, so it shows what a transient
+    /// emotion (<see cref="ShowEmotion"/>) or the Thinking face adds to the face.
+    /// </summary>
+    public float ExpressionShiftFromBase()
+    {
+        if (!_exprStarted || _exprState == null || _channelCount == 0) return 0f;
+        if (_baseScratch == null || _baseScratch.Length < _channelCount) _baseScratch = new float[_channelCount];
+        FillTarget(_baseScratch, baseMood, baseMoodStrength);
+        float max = 0f;
+        for (int c = 0; c < _channelCount; c++)
+        {
+            float rest = _opensMouth[c] ? _baseScratch[c] * RestingMouthOpenScale : _baseScratch[c];
+            max = Mathf.Max(max, Mathf.Abs(_exprState[c] - rest));
+        }
+        return max;
+    }
+
     /// <summary>
     /// Shows a transient emotion: crossfades in over emotionFadeIn, holds for <paramref name="holdSeconds"/>,
     /// then releases back to the base mood over emotionFadeOut. Intensity 0 releases immediately.
@@ -992,7 +1013,7 @@ public class NPCFace : MonoBehaviour
             strength = baseMoodStrength;
         }
 
-        FillTarget(emotion, strength);
+        FillTarget(_exprTarget, emotion, strength);
         // Moods and line emotions keep smiles, brows and eyes but only a hint of an open mouth: the lips part for
         // words, and a reaction held after the line ends would otherwise leave the mouth hanging open
         for (int c = 0; c < _channelCount; c++)
@@ -1034,9 +1055,9 @@ public class NPCFace : MonoBehaviour
             _exprState[c] = Mathf.Lerp(_exprFrom[c], _exprTarget[c], s);
     }
 
-    private void FillTarget(FaceEmotion emotion, float strength)
+    private void FillTarget(float[] target, FaceEmotion emotion, float strength)
     {
-        System.Array.Clear(_exprTarget, 0, _channelCount);
+        System.Array.Clear(target, 0, _channelCount);
 
         int e = (int)emotion;
         if (_emotionChannels == null || e < 0 || e >= _emotionChannels.Length || strength <= 0f) return;
@@ -1046,7 +1067,7 @@ public class NPCFace : MonoBehaviour
         if (channels == null) return;
 
         for (int i = 0; i < channels.Length; i++)
-            _exprTarget[channels[i]] = weights[i] * strength;
+            target[channels[i]] = weights[i] * strength;
     }
 
     /// <summary>Samples the looping idle capture into _ambient (per-instance phase and speed).</summary>

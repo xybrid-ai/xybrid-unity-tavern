@@ -40,5 +40,18 @@ public static class TableReactionMenu
 
     [MenuItem(FramesOnly, true)]
     private static bool CanRunFramesOnly() => EditorApplication.isPlaying;
+
+    private const string BlindTest = "Tavern/Table Reactions/Blind Test (Play mode, or F6)";
+
+    /// <summary>Your own blind rating: 16 lines, Off vs d1 at random, Y/N after each. Same as F6 in Play mode.</summary>
+    [MenuItem(BlindTest)]
+    private static void RunBlindTest()
+    {
+        if (TableReactionBlindTest.Running) TableReactionBlindTest.Cancel();
+        else TableReactionBlindTest.Begin();
+    }
+
+    [MenuItem(BlindTest, true)]
+    private static bool CanRunBlindTest() => EditorApplication.isPlaying;
 }
 #endif

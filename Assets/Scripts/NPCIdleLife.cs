@@ -23,6 +23,9 @@ public class NPCIdleLife : MonoBehaviour
     [Range(0f, 1f)]
     [SerializeField] private float glanceAtPlayerChance = 0.35f;
     [SerializeField] private float glanceRange = 7f;
+    [Tooltip("While the player talks to someone: no glances at them for this many seconds after each player " +
+             "line, so they don't read as a reaction to it. 0 = off.")]
+    [Min(0f)] [SerializeField] private float quietAfterPlayerLine = 7f;
     [Tooltip("Things worth a look: the fire, the door, the bar, another table...")]
     [SerializeField] private Transform[] pointsOfInterest;
     [Tooltip("When not glancing at the player: chance to look at a point of interest instead of gesturing.")]
@@ -144,6 +147,9 @@ public class NPCIdleLife : MonoBehaviour
 
         Transform eyes = _lookAt.PlayerEyes;
         if (eyes == null) return false;
+
+        if (DialogueManagerV2.ActiveNPC != null && DialogueManagerV2.PlayerSpokeWithin(quietAfterPlayerLine))
+            return false;
 
         Vector3 toPlayer = eyes.position - transform.position;
         if (Mathf.Abs(toPlayer.y) > MaxEyeHeightOffset) return false;

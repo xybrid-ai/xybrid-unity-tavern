@@ -80,8 +80,27 @@ missed reactions (rules: 57% / 71%, 4 of 6 needed reactions missed). We didn't s
   sidecar. Xybrid's d1 profile is CPU-only and reads the whole prompt once per question, so the game would
   need a GPU profile or prompt reuse first. Until then, d1 in the game still needs the separate local
   process, which is fine for development but not for a product.
-- **Small evidence base.** 22 + 7 sentences, one table, one machine (M5 Max), one live run in the Editor. We
-  have no human rating of how natural the reactions look yet.
+- **Small evidence base.** 22 + 7 sentences, one table, one machine (M5 Max), one live run in the Editor, and
+  blind tests with one player (below).
+
+## Can a player see it? (blind test, 2026-11-17)
+
+Correct labels are only useful if the player notices the reaction. In a blind test, the game says 16 lines to
+Master Wu for the player. Eight are about someone at the table and eight are small talk, and each line runs
+with or without d1 at random. After each line the player answers whether Shara or Varien responded to it.
+The score is the yes-rate after remarks minus the yes-rate after small talk.
+
+| | without d1 | with d1 |
+| --- | --- | --- |
+| first version: subtle faces, other characters glancing at the player at random | +0 | +25 |
+| second version: no random glances for 7 s after the player's line, stronger faces, nods, head shakes | +25 | **+75** |
+
+d1's labels were right on every remark in both runs. The first version hid them: random glances looked like
+reactions, so the player said yes after most small talk too. The faces also moved toward the expression each
+character already wore at rest. In the second version the player said yes to every reaction d1 performed (3
+of 3) and to none of the 8 small-talk lines. It is one player and 16 lines per run, so the gap is a strong
+direction, not a proof. The lesson for any decision-driven reaction: keep the moment after the player speaks
+free of random ambient motion, and choose reactions that differ from the character's resting expression.
 
 ## Recommendation
 
@@ -90,5 +109,5 @@ interpretation measure, never reacted to unrelated speech, and doesn't compete w
 Next steps:
 
 1. Ask for a GPU (Metal) or shared-prompt d1 profile in Xybrid, then move the game onto it and re-measure.
-2. Rate the reactions by eye in the scene.
+2. Repeat the blind test with more players and lines (the test is built in: F6 in Play mode).
 3. Improve tone reading, either with a larger decision model or with a few examples from this game.

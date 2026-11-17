@@ -71,6 +71,15 @@ public class DialogueManagerV2 : MonoBehaviour
     /// <summary>Id of the open dialogue session, or 0 when no dialogue is open.</summary>
     public static int CurrentSession { get; private set; }
 
+    /// <summary>Time.time when the player last submitted a line (-999 before any).</summary>
+    public static float LastPlayerLineTime { get; private set; } = -999f;
+
+    /// <summary>
+    /// True for <paramref name="seconds"/> after the player says something. Ambient looks at the player
+    /// (bystanders, table watchers) hold off in that window, so a look that does happen reads as a response.
+    /// </summary>
+    public static bool PlayerSpokeWithin(float seconds) => Time.time - LastPlayerLineTime < seconds;
+
     [Header("Provider Settings")]
     [SerializeField] private bool useAIDialogue = false;
     [SerializeField] private WorldLore worldLore;
@@ -398,6 +407,7 @@ public class DialogueManagerV2 : MonoBehaviour
         int turn = ++_turnInSession;
         var replyClock = System.Diagnostics.Stopwatch.StartNew();
         double firstTokenMs = -1;   // Written once by the streaming worker thread, read after the await
+        LastPlayerLineTime = Time.time;
         RaiseLineEvent(PlayerUtteranceSubmitted, new DialogueLineInfo(session, turn, _currentNPC, playerInput, success: true));
         _conversationHistory.Add($"Player: {playerInput}");
 
@@ -510,8 +520,29 @@ public class DialogueManagerV2 : MonoBehaviour
     // Input field lock/unlock
     // ================================================================
 
+    private bool _automationLock;
+
+    /// <summary>
+    /// Dev/automation: keeps the input field and Send button locked even between turns, so keys pressed during a
+    /// scripted run (the blind reaction test's Y/N) don't type into the field. <see cref="SubmitPlayerLine"/> still works.
+    /// </summary>
+    public void SetAutomationInputLock(bool locked)
+    {
+        _automationLock = locked;
+        if (locked)
+        {
+            if (playerInputField != null) playerInputField.DeactivateInputField();
+            SetInputLocked(true);
+        }
+        else if (_isDialogueOpen && !IsBusy)
+        {
+            SetInputLocked(false);
+        }
+    }
+
     private void SetInputLocked(bool locked)
     {
+        locked |= _automationLock;
         if (playerInputField != null)
             playerInputField.interactable = !locked;
         if (sendButton != null)
@@ -523,10 +554,10 @@ public class DialogueManagerV2 : MonoBehaviour
         if (playerInputField != null)
         {
             playerInputField.text = "";
-            playerInputField.interactable = true;
+            playerInputField.interactable = !_automationLock;
         }
         if (sendButton != null)
-            sendButton.interactable = true;
+            sendButton.interactable = !_automationLock;
     }
 
     // ================================================================
@@ -780,11 +811,11 @@ public class DialogueManagerV2 : MonoBehaviour
             {
                 playerInputField.gameObject.SetActive(true);
                 playerInputField.text = "";
-                playerInputField.interactable = true;
-                playerInputField.ActivateInputField();
+                playerInputField.interactable = !_automationLock;
+                if (!_automationLock) playerInputField.ActivateInputField();
             }
             if (sendButton != null)
-                sendButton.interactable = true;
+                sendButton.interactable = !_automationLock;
             HideOptions();
         }
         else
@@ -1061,6 +1092,7 @@ public class DialogueManagerV2 : MonoBehaviour
     {
         ActiveNPC = null;
         CurrentSession = 0;
+        LastPlayerLineTime = -999f;
         DialogueStarted = null;
         DialogueEnded = null;
         PlayerUtteranceSubmitted = null;

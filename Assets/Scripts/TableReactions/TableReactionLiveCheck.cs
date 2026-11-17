@@ -277,7 +277,7 @@ public class TableReactionLiveCheck : MonoBehaviour
     // Helpers
     // ================================================================
 
-    private static void PlacePlayerInFrontOf(NPCIdentity npc, float distance)
+    internal static void PlacePlayerInFrontOf(NPCIdentity npc, float distance)
     {
         PlayerMovement player = FindAnyObjectByType<PlayerMovement>();
         if (player == null) return;

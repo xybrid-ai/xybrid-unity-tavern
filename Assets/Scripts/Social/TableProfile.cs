@@ -30,7 +30,7 @@ namespace Tavern.Social
 
     public enum GazeKind { None, Player, Addressee, Referent }
 
-    public enum ReactionGesture { None, Nod, Shake, GlanceAway, GlanceToReferent }
+    public enum ReactionGesture { None, Nod, Shake, GlanceAway, GlanceToReferent, Laugh }
 
     /// <summary>One authored way a listener can react. All fields empty = a deliberate "do nothing".</summary>
     public sealed class ReactionOption
@@ -226,6 +226,7 @@ namespace Tavern.Social
                 case "shake": return ReactionGesture.Shake;
                 case "glance_away": return ReactionGesture.GlanceAway;
                 case "glance_referent": return ReactionGesture.GlanceToReferent;
+                case "laugh": return ReactionGesture.Laugh;
                 default: throw new FormatException("Rule " + rule + ": unknown gesture '" + value + "'.");
             }
         }

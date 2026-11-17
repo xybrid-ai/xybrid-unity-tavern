@@ -20,7 +20,8 @@ using UnityEngine.InputSystem;
 /// reaction per listener; <see cref="ListenerReactionPerformer"/> plays it through NPCLookAt/NPCGestures/NPCFace.
 /// Judgments for closed sessions, superseded turns or that arrive too late are discarded (<see cref="ReactionGate"/>).
 ///
-/// F3 cycles the mode, F4 toggles the debug overlay. Traces go to the Console ([TableReactions]) and to
+/// F3 cycles the mode, F4 toggles the debug overlay, F6 starts or stops the blind reaction test
+/// (<see cref="TableReactionBlindTest"/>). Traces go to the Console ([TableReactions]) and to
 /// Logs/table-reactions.jsonl. Put it next to the TableConversation.
 /// </summary>
 [DisallowMultipleComponent]
@@ -80,6 +81,31 @@ public class TableReactionDirector : MonoBehaviour
     public Mode CurrentMode => mode;
     public IReadOnlyList<ReactionTrace> RecentTraces => _recent;
 
+    /// <summary>Raw text of the profile in use (members + policy), for tagging test runs.</summary>
+    public string ProfileText { get; private set; }
+
+    public bool ShowOverlay
+    {
+        get => showOverlay;
+        set => showOverlay = value;
+    }
+
+    /// <summary>Blind testing: no Console lines that would reveal the mode (traces still go to the JSONL file).</summary>
+    public bool QuietConsole { get; set; }
+
+    /// <summary>Keep probing the d1 sidecar even while another mode is selected (the blind test switches per line).</summary>
+    public bool KeepSidecarChecked { get; set; }
+
+    public bool SidecarReady => _d1Healthy;
+
+    /// <summary>The trace of a player line, while it is among the last few.</summary>
+    public ReactionTrace FindTrace(int session, int turn)
+    {
+        for (int i = _recent.Count - 1; i >= 0; i--)
+            if (_recent[i].SessionId == session && _recent[i].TurnId == turn) return _recent[i];
+        return null;
+    }
+
     // ================================================================
     // Lifecycle
     // ================================================================
@@ -124,6 +150,7 @@ public class TableReactionDirector : MonoBehaviour
             TextAsset asset = profileJson != null ? profileJson : Resources.Load<TextAsset>("TableReactions/wu_table");
             if (asset == null) throw new FileNotFoundException("Resources/TableReactions/wu_table.json");
             _profile = TableProfile.Parse(asset.text, Enum.GetNames(typeof(FaceEmotion)));
+            ProfileText = asset.text;
             _policy = new ReactionPolicy(_profile, randomSeed != 0 ? new System.Random(randomSeed) : new System.Random());
         }
         catch (Exception ex)
@@ -146,10 +173,19 @@ public class TableReactionDirector : MonoBehaviour
     private void Update()
     {
         Keyboard kb = Keyboard.current;
-        if (kb != null && kb.f3Key.wasPressedThisFrame) SetMode((Mode)(((int)mode + 1) % 4));
-        if (kb != null && kb.f4Key.wasPressedThisFrame) showOverlay = !showOverlay;
+        if (kb != null && kb.f6Key.wasPressedThisFrame)
+        {
+            if (TableReactionBlindTest.Running) TableReactionBlindTest.Cancel();
+            else TableReactionBlindTest.Begin();
+        }
+        // Mode and overlay stay hidden and fixed during a blind run
+        if (!TableReactionBlindTest.Running)
+        {
+            if (kb != null && kb.f3Key.wasPressedThisFrame) SetMode((Mode)(((int)mode + 1) % 4));
+            if (kb != null && kb.f4Key.wasPressedThisFrame) showOverlay = !showOverlay;
+        }
 
-        if (mode == Mode.D1Sidecar && !_healthCheckRunning && Time.realtimeSinceStartup >= _nextHealthCheck)
+        if ((mode == Mode.D1Sidecar || KeepSidecarChecked) && !_healthCheckRunning && Time.realtimeSinceStartup >= _nextHealthCheck)
             _ = CheckSidecarAsync();
     }
 
@@ -157,7 +193,7 @@ public class TableReactionDirector : MonoBehaviour
     {
         if (newMode == mode) return;
         mode = newMode;
-        Debug.Log($"[TableReactions] Mode: {mode} ({JudgeLabel()})", this);
+        if (!QuietConsole) Debug.Log($"[TableReactions] Mode: {mode} ({JudgeLabel()})", this);
         _nextHealthCheck = 0f;
     }
 
@@ -167,7 +203,7 @@ public class TableReactionDirector : MonoBehaviour
         try
         {
             bool healthy = await _d1.IsHealthyAsync(CancellationToken.None);
-            if (healthy != _d1Healthy)
+            if (healthy != _d1Healthy && !QuietConsole)
                 Debug.Log($"[TableReactions] d1 sidecar at {sidecarUrl} is {(healthy ? "ready" : "unavailable")}.", this);
             _d1Healthy = healthy;
         }
@@ -551,7 +587,7 @@ public class TableReactionDirector : MonoBehaviour
     {
         if (trace.Flushed) return;
         trace.Flushed = true;
-        Debug.Log("[TableReactions] " + trace.CompactLine(), this);
+        if (!QuietConsole) Debug.Log("[TableReactions] " + trace.CompactLine(), this);
         if (writeTraceFile)
         {
             JObject json = trace.ToJson();

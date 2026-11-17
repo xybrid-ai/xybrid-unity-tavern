@@ -79,7 +79,8 @@ public static class ListenerReactionPerformer
         // Gesture
         if (plan.Gesture != ReactionGesture.None)
         {
-            if (plan.Gaze != GazeKind.None && (plan.Gesture == ReactionGesture.Nod || plan.Gesture == ReactionGesture.Shake))
+            if (plan.Gaze != GazeKind.None && (plan.Gesture == ReactionGesture.Nod || plan.Gesture == ReactionGesture.Shake ||
+                                               plan.Gesture == ReactionGesture.Laugh))
                 yield return new WaitForSeconds(GestureAfterLook);
 
             string again = stillValid();
@@ -113,6 +114,7 @@ public static class ListenerReactionPerformer
         switch (plan.Gesture)
         {
             case ReactionGesture.Nod: return NPCGesture.Nod;
+            case ReactionGesture.Laugh: return NPCGesture.Laugh;
             case ReactionGesture.Shake: return NPCGesture.Shake;
             case ReactionGesture.GlanceAway:
             {

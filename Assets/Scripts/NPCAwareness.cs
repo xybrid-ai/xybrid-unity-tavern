@@ -52,6 +52,9 @@ public class NPCAwareness : MonoBehaviour
     [SerializeField] private Vector2 glanceIntervalSeconds = new Vector2(4f, 8f);
     [Tooltip("Length of each glance (seconds, min/max).")]
     [SerializeField] private Vector2 glanceDurationSeconds = new Vector2(1.5f, 2.5f);
+    [Tooltip("While the player talks to someone else: no glances at them for this many seconds after each " +
+             "player line, so they don't read as a reaction to it. 0 = off.")]
+    [Min(0f)] [SerializeField] private float quietAfterPlayerLine = 7f;
     [Tooltip("Human reaction time before the NPC first looks over (seconds, min/max).")]
     [SerializeField] private Vector2 noticeDelaySeconds = new Vector2(0.15f, 0.5f);
 
@@ -262,6 +265,14 @@ public class NPCAwareness : MonoBehaviour
 
         // Occasional glances while the player hangs around
         if (Time.time < _nextGlanceTime) return;
+
+        // The player is mid-conversation with someone else and just spoke: hold off, so a glance
+        // now isn't mistaken for a reaction to the line
+        if (otherDialogue && DialogueManagerV2.PlayerSpokeWithin(quietAfterPlayerLine))
+        {
+            _nextGlanceTime = Time.time + 0.5f;
+            return;
+        }
 
         if (!visible)
         {
