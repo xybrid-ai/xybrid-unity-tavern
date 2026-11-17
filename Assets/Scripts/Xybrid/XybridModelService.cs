@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Tavern.Telemetry;
 using UnityEngine;
 using Xybrid;
 using Xybrid.ModelAsset;
@@ -29,9 +30,10 @@ namespace Tavern.Dialogue
         [Header("Settings")]
         [SerializeField] private bool _persistAcrossScenes = true;
 
-        [Header("Telemetry (optional)")]
-        [Tooltip("Env var name holding the telemetry API key. Read from project-root .env in Editor, or process env in builds. Leave empty to disable.")]
-        [SerializeField] private string _telemetryApiKeyEnvVar = "xybrid_api_key";
+        // Telemetry is optional and configured outside serialized data:
+        // Preferences > Xybrid Tavern > Telemetry (Editor), else .env / the
+        // xybrid_api_key environment variable. See TelemetryApiKey.
+        private bool _telemetryActive;
 
         // Legacy fallback — kept for backward compat with existing scenes
         [SerializeField, HideInInspector] private string _modelId;
@@ -220,8 +222,9 @@ namespace Tavern.Dialogue
                     _models[kvp.Key] = kvp.Value;
             }
 
-            // Legacy fallback: single model ID string
-            else if (!string.IsNullOrWhiteSpace(_modelId))
+            // Legacy fallback: single model ID string. Only when nothing above loaded a model,
+            // otherwise it downloads an extra LLM from the registry on top of the configured assets.
+            else if (_models.Count == 0 && !string.IsNullOrWhiteSpace(_modelId))
             {
                 Model model = null;
                 await Task.Run(() =>
@@ -237,7 +240,7 @@ namespace Tavern.Dialogue
                 });
                 _models[_modelId] = new ModelEntry { Model = model, Asset = null };
             }
-            else
+            else if (_models.Count == 0)
             {
                 throw new InvalidOperationException(
                     "No model assets assigned. Configure Model Assets in the Inspector on XybridModelService.");
@@ -311,7 +314,7 @@ namespace Tavern.Dialogue
             if (entry == null)
                 return DialogueResponse.FromError("No LLM model loaded");
 
-            await entry.Lock.WaitAsync();
+            await WaitForegroundAsync(entry);
             try
             {
                 string result = null;
@@ -370,7 +373,7 @@ namespace Tavern.Dialogue
             if (entry == null)
                 return DialogueResponse.FromError("No LLM model loaded");
 
-            await entry.Lock.WaitAsync();
+            await WaitForegroundAsync(entry);
             try
             {
                 string result = null;
@@ -398,7 +401,10 @@ namespace Tavern.Dialogue
                 });
 
                 if (error != null)
+                {
+                    Debug.LogWarning($"[XybridModelService] Streaming inference returned an error: {error}");
                     return DialogueResponse.FromError(error);
+                }
 
                 return new DialogueResponse
                 {
@@ -421,15 +427,106 @@ namespace Tavern.Dialogue
         }
 
         // ================================================================
+        // Background (low-priority) LLM runs
+        // ================================================================
+
+        /// <summary>Result of <see cref="RunBackgroundAsync"/> with its queue and inference timings.</summary>
+        public sealed class BackgroundRunResult
+        {
+            public bool Success;
+            public string Text;
+            public string Error;
+            public double QueueWaitMs;
+            public double InferenceMs;
+            public string ModelId;
+        }
+
+        private static async Task WaitForegroundAsync(ModelEntry entry)
+        {
+            Interlocked.Increment(ref entry.ForegroundPending);
+            try
+            {
+                await entry.Lock.WaitAsync();
+            }
+            finally
+            {
+                Interlocked.Decrement(ref entry.ForegroundPending);
+            }
+        }
+
+        /// <summary>
+        /// Low-priority LLM run on the shared dialogue model, for background judgments (table reactions).
+        /// It never starts while a player-facing request is waiting for the model and can be cancelled until
+        /// it starts; once running, a batch run can't be interrupted, so keep <paramref name="config"/>'s
+        /// max tokens small. Uses its own <paramref name="context"/>, never an NPC's dialogue history.
+        /// </summary>
+        public async Task<BackgroundRunResult> RunBackgroundAsync(string userInput, ConversationContext context,
+            GenerationConfig config, CancellationToken cancellationToken)
+        {
+            if (!_isReady)
+                return new BackgroundRunResult { Error = "XybridModelService not ready" };
+
+            var entry = GetLLMEntry();
+            if (entry == null)
+                return new BackgroundRunResult { Error = "No LLM model loaded" };
+
+            var waited = System.Diagnostics.Stopwatch.StartNew();
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (Volatile.Read(ref entry.ForegroundPending) == 0 && entry.Lock.Wait(0))
+                {
+                    // A reply may have queued between the check and the acquire: let it go first
+                    if (Volatile.Read(ref entry.ForegroundPending) == 0) break;
+                    entry.Lock.Release();
+                }
+                await Task.Delay(25, cancellationToken);
+            }
+            double queueWaitMs = waited.Elapsed.TotalMilliseconds;
+
+            try
+            {
+                var result = new BackgroundRunResult { QueueWaitMs = queueWaitMs, ModelId = entry.Model.ModelId };
+                var inference = System.Diagnostics.Stopwatch.StartNew();
+                await Task.Run(() =>
+                {
+                    using (var envelope = Envelope.Text(userInput))
+                    using (var inferenceResult = entry.Model.Run(envelope, context, config, cancellationToken))
+                    {
+                        result.Success = inferenceResult.Success;
+                        result.Text = inferenceResult.Text;
+                        result.Error = inferenceResult.Success ? null : inferenceResult.Error ?? "Inference failed";
+                    }
+                });
+                result.InferenceMs = inference.Elapsed.TotalMilliseconds;
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[XybridModelService] Background inference failed: {ex.Message}");
+                return new BackgroundRunResult { Error = ex.Message, QueueWaitMs = queueWaitMs };
+            }
+            finally
+            {
+                entry.Lock.Release();
+            }
+        }
+
+        // ================================================================
         // TTS inference
         // ================================================================
 
         /// <summary>
         /// Run TTS inference to generate audio from text.
         /// Returns raw PCM bytes (16-bit signed LE, 24kHz, mono), or null on failure.
+        /// Phonon picks the voice per call and ignores <paramref name="speed"/>. A line it cut off at its
+        /// per-chunk frame limit still plays: the partial audio is returned with a warning.
         /// </summary>
         public async Task<byte[]> RunTTSAsync(string text, string voiceId = null, double speed = 1.0)
         {
+            // Phonon mumbles up to its frame limit on a line with no words, such as "..."
+            if (!HasSpeakableText(text)) return null;
+
             var entry = GetTTSEntry();
             if (entry == null)
             {
@@ -443,13 +540,19 @@ namespace Tavern.Dialogue
                 byte[] audioBytes = null;
                 await Task.Run(() =>
                 {
-                    if (string.IsNullOrEmpty(voiceId) && speed == 1.0)
-                        audioBytes = entry.Model.RunTts(text);
-                    else
-                        audioBytes = entry.Model.RunTts(
-                            text,
-                            string.IsNullOrEmpty(voiceId) ? null : voiceId,
-                            speed);
+                    Envelope envelope = string.IsNullOrEmpty(voiceId) && speed == 1.0
+                        ? Envelope.Text(text)
+                        : Envelope.Text(text, string.IsNullOrEmpty(voiceId) ? null : voiceId, speed);
+                    using (InferenceResult result = entry.Model.Run(envelope))
+                    {
+                        if (result.SpeechStatus == TtsStatus.Limited && result.HasAudio)
+                            Debug.LogWarning($"[XybridModelService] TTS hit the frame limit in {result.LimitedChunks} chunk(s); playing partial audio: \"{text}\"");
+                        else
+                            result.ThrowIfFailed();
+                        if (!result.HasAudio)
+                            throw new InvalidOperationException($"TTS produced no audio (output: {result.OutputType})");
+                        audioBytes = result.AudioBytes;
+                    }
                 });
                 return audioBytes;
             }
@@ -464,22 +567,37 @@ namespace Tavern.Dialogue
             }
         }
 
+        private static bool HasSpeakableText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+            foreach (char c in text)
+                if (char.IsLetterOrDigit(c)) return true;
+            return false;
+        }
+
         // ================================================================
         // Telemetry
         // ================================================================
 
+        // Logs here stay generic: never the key, a configured value or a raw
+        // exception message (SDK errors can echo request details).
         private void TryInitializeTelemetry()
         {
-            if (string.IsNullOrWhiteSpace(_telemetryApiKeyEnvVar))
+            string apiKey;
+            TelemetryKeySource source;
+            try
             {
-                Debug.Log("[XybridModelService] Telemetry disabled (no API key env var configured).");
+                apiKey = TelemetryApiKey.Resolve(DotEnv.Get, out source);
+            }
+            catch (Exception)
+            {
+                Debug.LogWarning("[XybridModelService] Telemetry disabled: the API key configuration could not be read.");
                 return;
             }
 
-            string apiKey = DotEnv.Get(_telemetryApiKeyEnvVar);
-            if (string.IsNullOrWhiteSpace(apiKey))
+            if (apiKey == null)
             {
-                Debug.LogWarning($"[XybridModelService] Telemetry disabled: '{_telemetryApiKeyEnvVar}' not found in .env or environment.");
+                Debug.Log("[XybridModelService] Telemetry disabled: no API key configured.");
                 return;
             }
 
@@ -492,11 +610,12 @@ namespace Tavern.Dialogue
                 {
                     XybridClient.InitializeTelemetry(config);
                 }
-                Debug.Log("[XybridModelService] Telemetry initialized → ingest.xybrid.dev");
+                _telemetryActive = true;
+                Debug.Log($"[XybridModelService] Telemetry initialized (key source: {source}).");
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Debug.LogError($"[XybridModelService] Telemetry init failed: {ex.Message}");
+                Debug.LogWarning("[XybridModelService] Telemetry disabled: initialization failed. Models load without it.");
             }
         }
 
@@ -506,13 +625,17 @@ namespace Tavern.Dialogue
 
         private void OnApplicationPause(bool paused)
         {
-            if (paused) XybridClient.FlushTelemetry();
+            if (paused && _telemetryActive) XybridClient.FlushTelemetry();
         }
 
         private void OnDestroy()
         {
-            XybridClient.FlushTelemetry();
-            XybridClient.ShutdownTelemetry();
+            if (_telemetryActive)
+            {
+                XybridClient.FlushTelemetry();
+                XybridClient.ShutdownTelemetry();
+                _telemetryActive = false;
+            }
 
             foreach (var entry in _models.Values)
                 entry.Model?.Dispose();
@@ -532,6 +655,8 @@ namespace Tavern.Dialogue
             /// <summary>Task override for models loaded without an asset (e.g., raw GGUF).</summary>
             public string Task;
             public readonly SemaphoreSlim Lock = new SemaphoreSlim(1, 1);
+            /// <summary>Player-facing requests waiting for <see cref="Lock"/>; background runs yield to them.</summary>
+            public int ForegroundPending;
         }
     }
 }

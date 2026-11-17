@@ -1,19 +1,43 @@
-# Releasing
+# Source distribution
 
-## Creating a New Release
+Distribute reviewed source with instructions for local licensed asset imports.
+Run `python3 tools/check_repository.py` before publishing source.
 
-1. Run the release script with a version number:
-   ```bash
-   ./scripts/release.sh v0.1.0-alpha3
-   ```
+## Credential scan
 
-2. This creates a zip in `releases/` containing the full Unity project
+`tools/check_repository.py` rejects credential-shaped values in tracked and
+trackable text files: known key prefixes (for example `sk_live_`, `xy_test_`,
+`hf_`, `ghp_`), private key blocks, and literal values assigned to names such
+as `api_key`, `secret` or `token`. A bare `xybrid_api_key` variable name and
+placeholders such as `<your key>` pass. It also rejects the removed
+`_telemetryApiKeyEnvVar` field in scenes, prefabs, assets and C# files.
+Findings name the file, line and rule; matched values are never printed.
 
-3. Create a GitHub release and upload the zip:
-   ```bash
-   git tag v0.1.0-alpha3 && git push origin v0.1.0-alpha3
-   gh release create v0.1.0-alpha3 releases/Night-Tavern-v0.1.0-alpha3.zip \
-     --repo xybrid-ai/xybrid-unity-tavern \
-     --title "Night-Tavern v0.1.0-alpha3" \
-     --notes "Alpha 3 release of Night Tavern demo."
-   ```
+Before you upload any release ZIP, scan it explicitly:
+
+```sh
+python3 tools/check_repository.py --archive path/to/release.zip
+```
+
+The archive check reads every text entry, including entries in nested ZIPs,
+without extracting the archive. It fails on `.env` entries (except
+`.env.example`, `.env.sample` and `.env.template`), credential-shaped values,
+the removed serialized field, unreadable or encrypted entries, and nested
+archives that it cannot open (for example `.unitypackage`). Binary entries are
+skipped, so it does not certify compiled player data. Repeat `--archive` to
+scan several ZIPs. The scanner tests use synthetic fixtures only:
+`python3 -m unittest discover -s tools/tests`.
+
+Telemetry keys come from local configuration only (see the README): Editor
+preferences or `.env` in the Editor, and the `xybrid_api_key` process
+environment variable in player builds.
+
+Do not run the legacy full-project release ZIP script or upload full `Assets/`
+archives, paid pack files, embedded art meshes, models or native tool bundles.
+The old `scripts/release.sh` is superseded by this policy and remains local.
+
+Existing release ZIPs require an explicit content audit and, if needed, separate
+authorized removal. They have not been inspected or removed by this split.
+
+Player releases are separate from source distribution and require the relevant
+asset/model licenses to be checked. No player build is part of this migration.

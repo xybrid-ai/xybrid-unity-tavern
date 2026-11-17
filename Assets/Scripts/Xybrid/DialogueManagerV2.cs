@@ -16,6 +16,70 @@ using Tavern.Dialogue;
 /// </summary>
 public class DialogueManagerV2 : MonoBehaviour
 {
+    // ================================================================
+    // Dialogue events (consumed by ambient NPC behaviours: wanderers,
+    // table conversations, awareness)
+    // ================================================================
+
+    /// <summary>Raised once the NPC has been set up to face the player at dialogue start.</summary>
+    public static event System.Action<NPCIdentity> DialogueStarted;
+
+    /// <summary>Raised when dialogue closes, before the current NPC reference is released.</summary>
+    public static event System.Action<NPCIdentity> DialogueEnded;
+
+    /// <summary>The NPC currently in dialogue with the player, or null when no dialogue is open.</summary>
+    public static NPCIdentity ActiveNPC { get; private set; }
+
+    /// <summary>One line of an open dialogue, as published to listeners such as table reactions.</summary>
+    public readonly struct DialogueLineInfo
+    {
+        /// <summary>Dialogue session id; changes on every dialogue start and end.</summary>
+        public readonly int Session;
+        /// <summary>Player turn within the session, from 1. The NPC greeting is turn 0; a reply shares its player turn.</summary>
+        public readonly int Turn;
+        public readonly NPCIdentity Npc;
+        public readonly string Text;
+        /// <summary>Time.realtimeSinceStartup when the line was submitted or completed.</summary>
+        public readonly float Realtime;
+        /// <summary>False for an NPC line that failed to generate.</summary>
+        public readonly bool Success;
+        /// <summary>Reply only: wall-clock ms from the player's submit to the first streamed token (-1 if none).</summary>
+        public readonly double FirstTokenMs;
+        /// <summary>Reply only: wall-clock ms from the player's submit to the final text.</summary>
+        public readonly double TotalMs;
+
+        public DialogueLineInfo(int session, int turn, NPCIdentity npc, string text, bool success,
+            double firstTokenMs = -1, double totalMs = 0)
+        {
+            Session = session;
+            Turn = turn;
+            Npc = npc;
+            Text = text;
+            Realtime = Time.realtimeSinceStartup;
+            Success = success;
+            FirstTokenMs = firstTokenMs;
+            TotalMs = totalMs;
+        }
+    }
+
+    /// <summary>Raised on the main thread when the player submits a line, before any inference starts.</summary>
+    public static event System.Action<DialogueLineInfo> PlayerUtteranceSubmitted;
+
+    /// <summary>Raised when an NPC line is final: the greeting (turn 0) or the reply to a player turn.</summary>
+    public static event System.Action<DialogueLineInfo> NpcLineCompleted;
+
+    /// <summary>Id of the open dialogue session, or 0 when no dialogue is open.</summary>
+    public static int CurrentSession { get; private set; }
+
+    /// <summary>Time.time when the player last submitted a line (-999 before any).</summary>
+    public static float LastPlayerLineTime { get; private set; } = -999f;
+
+    /// <summary>
+    /// True for <paramref name="seconds"/> after the player says something. Ambient looks at the player
+    /// (bystanders, table watchers) hold off in that window, so a look that does happen reads as a response.
+    /// </summary>
+    public static bool PlayerSpokeWithin(float seconds) => Time.time - LastPlayerLineTime < seconds;
+
     [Header("Provider Settings")]
     [SerializeField] private bool useAIDialogue = false;
     [SerializeField] private WorldLore worldLore;
@@ -43,6 +107,21 @@ public class DialogueManagerV2 : MonoBehaviour
     [Header("TTS Audio")]
     [SerializeField] private TTSAudioPlayer _ttsPlayer;
 
+    /// <summary>How NVIDIA Audio2Face (the local dev bridge, <see cref="Audio2FaceBridge"/>) drives NPC mouths.</summary>
+    public enum Audio2FaceMode
+    {
+        Off,                    // Rhubarb lip sync only
+        SwapWhenReady,          // The voice starts at once; the mouth switches to Audio2Face when its track is ready
+        HoldVoiceUntilReady     // Each line waits for its Audio2Face track and uses it from the first word
+    }
+
+    [Header("Audio2Face (dev bridge)")]
+    [Tooltip("NVIDIA Audio2Face-3D mouth from the local Python worker (tools/audio2face; Editor on macOS). " +
+             "Off: Rhubarb only. Swap When Ready: the voice starts at once and the mouth switches to Audio2Face " +
+             "about a quarter of the line in. Hold Voice Until Ready: each line waits for its track (about a quarter " +
+             "of its length) and uses it throughout. Brows, eyes and head stay NPCFace's own either way.")]
+    [SerializeField] private Audio2FaceMode audio2Face = Audio2FaceMode.Off;
+
     [Header("Debug")]
     [SerializeField] private NPCDebugPanel npcDebugPanel;
 
@@ -69,6 +148,13 @@ public class DialogueManagerV2 : MonoBehaviour
     private List<string> _conversationHistory = new List<string>();
     private bool _isProcessing;
     private bool _isDialogueOpen;
+    private int _dialogueSession;   // Bumped on start/end so late async continuations can tell they're stale
+    private int _talkingLine;       // Bumped whenever an NPC line starts its talking animation
+    private int _turnInSession;     // Player turns in the open session (published with each utterance)
+    private bool _greetingInFlight; // Input stays locked until the greeting is final (no reply racing the greeting)
+
+    /// <summary>False while the provider is still loading or another dialogue is open/processing.</summary>
+    public bool CanStartDialogue => _provider != null && !_isProcessing && !_isDialogueOpen;
     private CanvasGroup _panelCanvasGroup;
 
     // Streaming token queue — filled by background thread, consumed by typewriter coroutine
@@ -84,6 +170,11 @@ public class DialogueManagerV2 : MonoBehaviour
         if (_panelCanvasGroup == null)
             _panelCanvasGroup = dialoguePanel.AddComponent<CanvasGroup>();
         _panelCanvasGroup.alpha = 0f;
+
+        // Lip sync's CLI copy (and the Audio2Face worker, when on) start while the models load, not on the first line
+        RhubarbLipSync.Prewarm();
+        if (audio2Face != Audio2FaceMode.Off)
+            Audio2FaceBridge.Prewarm();
 
         // Initialize providers
         _scriptedProvider = new ScriptedDialogueProvider();
@@ -168,8 +259,13 @@ public class DialogueManagerV2 : MonoBehaviour
 
     public async void StartDialogue(NPCIdentity npc)
     {
-        if (_isProcessing || _isDialogueOpen) return;
+        if (!CanStartDialogue) return;
         _isDialogueOpen = true;
+        int session = ++_dialogueSession;
+        CurrentSession = session;
+        _turnInSession = 0;
+        _greetingInFlight = true;
+        SetInputLocked(true);
 
         _currentNPC = npc;
         _currentExchangeIndex = 0;
@@ -184,7 +280,14 @@ public class DialogueManagerV2 : MonoBehaviour
         if (npcDebugPanel != null)
             npcDebugPanel.Show(npc);
 
-        npc.GetComponent<NPCLookAt>()?.StartLookingAtPlayer();
+        // TryGetComponent: in the Editor GetComponent returns a "fake null" that `?.` doesn't catch,
+        // which would throw for NPCs without NPCLookAt and skip DialogueStarted below
+        if (npc.TryGetComponent(out NPCLookAt npcLookAt))
+            npcLookAt.StartLookingAtPlayer();
+
+        // Let ambient behaviours (wanderers, table chatter, awareness) react
+        ActiveNPC = npc;
+        RaiseDialogueEvent(DialogueStarted, npc);
 
         var cameraFocus = FindFirstObjectByType<DialogueCameraFocus>();
         cameraFocus?.FocusOn(npc.transform);
@@ -200,7 +303,11 @@ public class DialogueManagerV2 : MonoBehaviour
                 _streamingComplete = false;
                 _typewriterCoroutine = StartCoroutine(StreamingTypewriterEffect());
 
-                response = await _provider.GetGreetingStreamingAsync(npc, OnStreamToken);
+                response = await _provider.GetGreetingStreamingAsync(npc, token =>
+                {
+                    if (session == _dialogueSession) OnStreamToken(token);
+                });
+                if (session != _dialogueSession) return;
                 _streamingComplete = true;
             }
             else
@@ -210,16 +317,23 @@ public class DialogueManagerV2 : MonoBehaviour
         }
         catch (System.Exception ex)
         {
+            if (session != _dialogueSession) return;
             Debug.LogError($"[DialogueManager] Greeting failed: {ex.Message}");
             _streamingComplete = true;
             response = DialogueResponse.FromError(ex.Message);
         }
 
+        // Dialogue was closed (and maybe another opened) while the greeting was generating
+        if (session != _dialogueSession) return;
+
+        _greetingInFlight = false;
         SetThinking(false);
 
         if (!response.Success)
         {
             ShowNPCText("*The NPC stares blankly...*");
+            SetInputLocked(false);
+            RaiseLineEvent(NpcLineCompleted, new DialogueLineInfo(session, 0, npc, null, success: false));
             return;
         }
 
@@ -235,8 +349,11 @@ public class DialogueManagerV2 : MonoBehaviour
         if (conversationHistoryUI != null)
             conversationHistoryUI.AddMessage(npc.npcName, response.Text, isPlayer: false);
 
+        ShowLineEmotion(npc, response.Text);
+        RaiseLineEvent(NpcLineCompleted, new DialogueLineInfo(session, 0, npc, response.Text, success: true));
+
         // Fire-and-forget TTS (non-blocking, non-fatal)
-        _ = PlayTTSAsync(response.Text, npc.voiceId, npc.voiceSpeed);
+        _ = PlayTTSAsync(npc, response.Text, npc.voiceId, npc.voiceSpeed);
 
         await ShowPlayerInput();
     }
@@ -254,7 +371,7 @@ public class DialogueManagerV2 : MonoBehaviour
 
     private void OnSendClicked()
     {
-        if (_isProcessing) return;
+        if (_isProcessing || _greetingInFlight) return;
         if (playerInputField == null) return;
         if (string.IsNullOrWhiteSpace(playerInputField.text)) return;
 
@@ -266,9 +383,32 @@ public class DialogueManagerV2 : MonoBehaviour
         _ = ProcessPlayerInput(input, -1);
     }
 
+    /// <summary>True while a greeting or reply is being produced (input is locked).</summary>
+    public bool IsBusy => _isProcessing || _greetingInFlight;
+
+    /// <summary>
+    /// Dev/automation hook: submits a free-form player line exactly as typing it and pressing Send would.
+    /// Returns false when no AI dialogue is open or input is currently locked.
+    /// </summary>
+    public bool SubmitPlayerLine(string text)
+    {
+        if (!_isDialogueOpen || IsBusy || string.IsNullOrWhiteSpace(text)) return false;
+        if (!(_provider?.SupportsFreeInput ?? false)) return false;
+        if (playerInputField != null) playerInputField.text = text.Trim();
+        SetInputLocked(true);
+        _ = ProcessPlayerInput(text.Trim(), -1);
+        return true;
+    }
+
     private async System.Threading.Tasks.Task ProcessPlayerInput(string playerInput, int optionIndex)
     {
         _isProcessing = true;
+        int session = _dialogueSession;
+        int turn = ++_turnInSession;
+        var replyClock = System.Diagnostics.Stopwatch.StartNew();
+        double firstTokenMs = -1;   // Written once by the streaming worker thread, read after the await
+        LastPlayerLineTime = Time.time;
+        RaiseLineEvent(PlayerUtteranceSubmitted, new DialogueLineInfo(session, turn, _currentNPC, playerInput, success: true));
         _conversationHistory.Add($"Player: {playerInput}");
 
         if (conversationHistoryUI != null)
@@ -293,7 +433,12 @@ public class DialogueManagerV2 : MonoBehaviour
                         _currentNPC,
                         playerInput,
                         _conversationHistory.ToArray(),
-                        OnStreamToken);
+                        token =>
+                        {
+                            if (firstTokenMs < 0) firstTokenMs = replyClock.Elapsed.TotalMilliseconds;
+                            if (session == _dialogueSession) OnStreamToken(token);
+                        });
+                    if (session != _dialogueSession) return;
                     _streamingComplete = true;
                 }
                 else
@@ -320,15 +465,25 @@ public class DialogueManagerV2 : MonoBehaviour
         }
         catch (System.Exception ex)
         {
+            if (session != _dialogueSession) return;
             Debug.LogError($"[DialogueManager] Response failed: {ex.Message}");
             _streamingComplete = true;
             response = DialogueResponse.FromError(ex.Message);
         }
 
+        // Dialogue was closed mid-inference: EndDialogue already reset state, leave it alone
+        if (session != _dialogueSession) return;
+
+        double replyMs = replyClock.Elapsed.TotalMilliseconds;
+        if (_provider.SupportsFreeInput)
+            Debug.Log($"[DialogueManager] Reply S{session} T{turn}: first token " +
+                      $"{(firstTokenMs < 0 ? "n/a" : firstTokenMs.ToString("0"))} ms, total {replyMs:0} ms");
+
         SetThinking(false);
 
         if (!response.Success)
         {
+            RaiseLineEvent(NpcLineCompleted, new DialogueLineInfo(session, turn, _currentNPC, null, false, firstTokenMs, replyMs));
             ShowNPCText("*The NPC seems lost in thought...*");
             _isProcessing = false;
             UnlockAndClearInput();
@@ -349,20 +504,45 @@ public class DialogueManagerV2 : MonoBehaviour
         if (conversationHistoryUI != null)
             conversationHistoryUI.AddMessage(_currentNPC.npcName, response.Text, isPlayer: false);
 
+        ShowLineEmotion(_currentNPC, response.Text);
+        RaiseLineEvent(NpcLineCompleted, new DialogueLineInfo(session, turn, _currentNPC, response.Text, true, firstTokenMs, replyMs));
+
         // Fire-and-forget TTS (non-blocking, non-fatal)
-        _ = PlayTTSAsync(response.Text, _currentNPC.voiceId, _currentNPC.voiceSpeed);
+        _ = PlayTTSAsync(_currentNPC, response.Text, _currentNPC.voiceId, _currentNPC.voiceSpeed);
 
         UnlockAndClearInput();
         await ShowPlayerInput();
-        _isProcessing = false;
+        if (session == _dialogueSession)
+            _isProcessing = false;
     }
 
     // ================================================================
     // Input field lock/unlock
     // ================================================================
 
+    private bool _automationLock;
+
+    /// <summary>
+    /// Dev/automation: keeps the input field and Send button locked even between turns, so keys pressed during a
+    /// scripted run (the blind reaction test's Y/N) don't type into the field. <see cref="SubmitPlayerLine"/> still works.
+    /// </summary>
+    public void SetAutomationInputLock(bool locked)
+    {
+        _automationLock = locked;
+        if (locked)
+        {
+            if (playerInputField != null) playerInputField.DeactivateInputField();
+            SetInputLocked(true);
+        }
+        else if (_isDialogueOpen && !IsBusy)
+        {
+            SetInputLocked(false);
+        }
+    }
+
     private void SetInputLocked(bool locked)
     {
+        locked |= _automationLock;
         if (playerInputField != null)
             playerInputField.interactable = !locked;
         if (sendButton != null)
@@ -374,33 +554,153 @@ public class DialogueManagerV2 : MonoBehaviour
         if (playerInputField != null)
         {
             playerInputField.text = "";
-            playerInputField.interactable = true;
+            playerInputField.interactable = !_automationLock;
         }
         if (sendButton != null)
-            sendButton.interactable = true;
+            sendButton.interactable = !_automationLock;
     }
 
     // ================================================================
     // TTS playback
     // ================================================================
 
-    private async Task PlayTTSAsync(string text, string voiceId, float speed = 1.0f)
+    /// <summary>
+    /// Synthesizes and plays <paramref name="text"/> in <paramref name="npc"/>'s voice, positioned at their head.
+    /// Their NPCFace (if any) lip-syncs from the clip's spectrum right away, then from Rhubarb visemes once
+    /// analysed (Phonon reports no timings of its own), or from an Audio2Face track when the dev bridge is on.
+    /// </summary>
+    private async Task PlayTTSAsync(NPCIdentity npc, string text, string voiceId, float speed = 1.0f)
     {
         if (_ttsPlayer == null) return;
 
         var service = XybridModelService.Instance;
         if (service == null || !service.HasTTSModel) return;
 
+        int session = _dialogueSession;
         try
         {
             byte[] pcm = await service.RunTTSAsync(text, voiceId, speed);
-            if (pcm != null && pcm.Length > 0)
-                _ttsPlayer.PlayPCM(pcm);
+            // Dialogue closed (and maybe another opened) while synthesizing: stay silent
+            if (session != _dialogueSession || _ttsPlayer == null) return;
+            if (pcm == null || pcm.Length == 0) return;
+
+            // Audio2Face (dev bridge) analyses the same PCM; holding the voice waits for its track first
+            Task<FaceTrack> trackTask = StartAudio2Face(npc, text, pcm);
+            FaceTrack heldTrack = null;
+            if (trackTask != null && audio2Face == Audio2FaceMode.HoldVoiceUntilReady)
+            {
+                float holdStart = Time.realtimeSinceStartup;
+                heldTrack = await trackTask;
+                trackTask = null;
+                if (session != _dialogueSession || _ttsPlayer == null) return;
+                Debug.Log($"[DialogueManager] Audio2Face held {npc.name}'s voice " +
+                          $"{(Time.realtimeSinceStartup - holdStart) * 1000f:0} ms " +
+                          (heldTrack != null ? $"({heldTrack.Frames} frames)" : "(no track: Rhubarb lip sync)"));
+            }
+
+            _ttsPlayer.SetSpeaker(npc != null ? npc.transform : null);
+            AudioClip clip = _ttsPlayer.PlayPCM(pcm);
+            if (clip == null || npc == null) return;
+            _ = StopTalkingWhenVoiceEndsAsync(npc, clip, session, _talkingLine);
+
+            // Explicit null checks rather than ?. : a destroyed face must not be called
+            NPCFace face = npc.GetComponentInChildren<NPCFace>();
+            if (face == null) return;
+            face.Speak(_ttsPlayer.Source, clip, text);
+            if (heldTrack != null)
+                face.SetFaceTrack(clip, heldTrack);
+            else if (trackTask != null)
+                _ = ApplyFaceTrackWhenReadyAsync(face, clip, trackTask, session);
+
+            // Instant in-engine visemes from the clip's spectrum (works everywhere); Rhubarb refines them a moment later
+            LipSyncCue[] spectralCues = SpectralLipSync.Analyze(clip);
+            if (spectralCues != null)
+                face.SetLipSyncCues(clip, spectralCues);
+
+            // A held Audio2Face track owns this line's mouth; otherwise Rhubarb carries it (or its start, when swapping)
+            if (heldTrack != null || !RhubarbLipSync.IsAvailable) return;
+            float analysisStart = Time.realtimeSinceStartup;
+            LipSyncCue[] cues = await RhubarbLipSync.AnalyzeAsync(clip, text);
+            // Stale session, failed analysis, or the clip was replaced/destroyed by a newer line
+            if (session != _dialogueSession || cues == null || face == null || clip == null) return;
+            face.SetLipSyncCues(clip, cues);
+            Debug.Log($"[DialogueManager] Lip sync for {face.name} from Rhubarb ({cues.Length} cues, " +
+                      $"{(Time.realtimeSinceStartup - analysisStart) * 1000f:0} ms for a {clip.length:0.0}s line)");
         }
         catch (System.Exception ex)
         {
             Debug.LogWarning($"[DialogueManager] TTS failed (non-fatal): {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Starts Audio2Face on a line's PCM when the dev bridge is on and set up, with the line's emotion (or the NPC's
+    /// base mood when the line's is faint); null otherwise.
+    /// </summary>
+    private Task<FaceTrack> StartAudio2Face(NPCIdentity npc, string text, byte[] pcm)
+    {
+        if (audio2Face == Audio2FaceMode.Off || npc == null || !Audio2FaceBridge.IsAvailable) return null;
+        NPCFace face = npc.GetComponentInChildren<NPCFace>();
+        if (face == null) return null;
+
+        FaceEmotion emotion = face.BaseMood;
+        float intensity = 0.45f;
+        if (LineEmotion.TryAnalyze(text, out FaceEmotion lineEmotion, out float lineIntensity) && lineIntensity >= 0.45f)
+        {
+            emotion = lineEmotion;
+            intensity = lineIntensity;
+        }
+        return Audio2FaceBridge.AnalyzeAsync(pcm, TTSAudioPlayer.SampleRate, Audio2FaceBridge.EmotionFor(emotion, intensity));
+    }
+
+    /// <summary>Hands the Audio2Face track to the face once it's ready, if the line is still the current one.</summary>
+    private async Task ApplyFaceTrackWhenReadyAsync(NPCFace face, AudioClip clip, Task<FaceTrack> trackTask, int session)
+    {
+        try
+        {
+            FaceTrack track = await trackTask;
+            if (track == null || session != _dialogueSession || face == null || clip == null) return;
+            AudioSource source = _ttsPlayer != null ? _ttsPlayer.Source : null;
+            if (source == null || source.clip != clip) return;
+            face.SetFaceTrack(clip, track);
+            Debug.Log($"[DialogueManager] Audio2Face mouth for {face.name} from {source.time:0.00}s into a {clip.length:0.0}s line");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning($"[DialogueManager] Audio2Face track failed (non-fatal): {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Ends the talking body animation once <paramref name="npc"/>'s voiced line has played out, unless the dialogue
+    /// closed or a newer line has started talking in the meantime.
+    /// </summary>
+    private async Task StopTalkingWhenVoiceEndsAsync(NPCIdentity npc, AudioClip clip, int session, int talkingLine)
+    {
+        AudioSource source = _ttsPlayer != null ? _ttsPlayer.Source : null;
+        while (source != null && clip != null && source.clip == clip && source.isPlaying && session == _dialogueSession)
+            await Task.Delay(100);
+
+        if (session != _dialogueSession || talkingLine != _talkingLine || npc == null) return;
+        var animator = npc.GetComponentInChildren<Animator>();
+        if (animator != null)
+            animator.SetBool("isTalking", false);
+    }
+
+    /// <summary>
+    /// Shows the emotion a line reads with on the NPC's face, held for roughly as long as the line lasts.
+    /// Runs whether or not TTS is available.
+    /// </summary>
+    private static void ShowLineEmotion(NPCIdentity npc, string text)
+    {
+        if (npc == null || string.IsNullOrEmpty(text)) return;
+        if (!LineEmotion.TryAnalyze(text, out FaceEmotion emotion, out float intensity)) return;
+
+        NPCFace face = npc.GetComponentInChildren<NPCFace>();
+        if (face == null) return;
+
+        float holdSeconds = Mathf.Min(2.5f + 0.04f * text.Length, 8f);
+        face.ShowEmotion(emotion, intensity, holdSeconds);
     }
 
     // ================================================================
@@ -471,6 +771,7 @@ public class DialogueManagerV2 : MonoBehaviour
                         var animator = _currentNPC.GetComponentInChildren<Animator>();
                         if (animator != null)
                             animator.SetBool("isTalking", true);
+                        _talkingLine++;
                     }
                 }
 
@@ -510,11 +811,11 @@ public class DialogueManagerV2 : MonoBehaviour
             {
                 playerInputField.gameObject.SetActive(true);
                 playerInputField.text = "";
-                playerInputField.interactable = true;
-                playerInputField.ActivateInputField();
+                playerInputField.interactable = !_automationLock;
+                if (!_automationLock) playerInputField.ActivateInputField();
             }
             if (sendButton != null)
-                sendButton.interactable = true;
+                sendButton.interactable = !_automationLock;
             HideOptions();
         }
         else
@@ -559,6 +860,7 @@ public class DialogueManagerV2 : MonoBehaviour
             var animator = _currentNPC.GetComponentInChildren<Animator>();
             if (animator != null)
                 animator.SetBool("isTalking", true);
+            _talkingLine++;
         }
 
         _typewriterCoroutine = StartCoroutine(TypewriterEffect(text));
@@ -650,10 +952,27 @@ public class DialogueManagerV2 : MonoBehaviour
             StopCoroutine(_typewriterCoroutine);
 
         if (_ttsPlayer != null)
+        {
             _ttsPlayer.Stop();
+            _ttsPlayer.SetSpeaker(null);
+        }
 
-        _currentNPC?.GetComponentInChildren<Animator>()?.SetBool("isTalking", false);
-        _currentNPC?.GetComponent<NPCLookAt>()?.StopLookingAtPlayer(returnToOriginal: true);
+        var npcAnimator = _currentNPC != null ? _currentNPC.GetComponentInChildren<Animator>() : null;
+        if (npcAnimator != null)
+        {
+            npcAnimator.SetBool("isTalking", false);
+            npcAnimator.SetBool("isThinking", false);
+        }
+
+        // Close the mouth now instead of waiting for the face to notice the clip is gone
+        var npcFace = _currentNPC != null ? _currentNPC.GetComponentInChildren<NPCFace>() : null;
+        if (npcFace != null)
+            npcFace.StopSpeaking();
+
+        // TryGetComponent (not GetComponent?.) so a missing NPCLookAt can't abort EndDialogue
+        // before ActiveNPC is cleared and DialogueEnded is raised
+        if (_currentNPC != null && _currentNPC.TryGetComponent(out NPCLookAt npcLookAt))
+            npcLookAt.StopLookingAtPlayer(returnToOriginal: true);
 
         var cameraFocus = FindFirstObjectByType<DialogueCameraFocus>();
         cameraFocus?.Unfocus();
@@ -666,6 +985,18 @@ public class DialogueManagerV2 : MonoBehaviour
 
         HidePanel();
         _isDialogueOpen = false;
+        // Invalidate in-flight greeting/response continuations so they can't touch the next dialogue
+        _dialogueSession++;
+        CurrentSession = 0;
+        _isProcessing = false;
+        _greetingInFlight = false;
+
+        // Notify ambient behaviours before the NPC reference is released
+        NPCIdentity endedNPC = _currentNPC;
+        ActiveNPC = null;
+        if (endedNPC != null)
+            RaiseDialogueEvent(DialogueEnded, endedNPC);
+
         _currentNPC = null;
         _conversationHistory.Clear();
         ClearTokenQueue();
@@ -713,6 +1044,61 @@ public class DialogueManagerV2 : MonoBehaviour
             dialoguePanel.SetActive(false);
     }
 
+    /// <summary>
+    /// Invokes each subscriber in isolation so one faulty listener can't block
+    /// the others or abort the dialogue flow.
+    /// </summary>
+    private static void RaiseDialogueEvent(System.Action<NPCIdentity> handlers, NPCIdentity npc)
+    {
+        if (handlers == null) return;
+
+        foreach (System.Delegate handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((System.Action<NPCIdentity>)handler)(npc);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+        }
+    }
+
+    /// <summary>Same isolation as <see cref="RaiseDialogueEvent"/>, for line events.</summary>
+    private static void RaiseLineEvent(System.Action<DialogueLineInfo> handlers, DialogueLineInfo info)
+    {
+        if (handlers == null) return;
+
+        foreach (System.Delegate handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((System.Action<DialogueLineInfo>)handler)(info);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Clears static dialogue state on play-mode entry (needed when domain reload is disabled).
+    /// Runs before any Awake/OnEnable, so subscribers re-register afterwards.
+    /// </summary>
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStatics()
+    {
+        ActiveNPC = null;
+        CurrentSession = 0;
+        LastPlayerLineTime = -999f;
+        DialogueStarted = null;
+        DialogueEnded = null;
+        PlayerUtteranceSubmitted = null;
+        NpcLineCompleted = null;
+    }
+
     private void OnDestroy()
     {
         // Model lifecycle is owned by XybridModelService — nothing to dispose here.
@@ -731,7 +1117,7 @@ public class DialogueManagerV2 : MonoBehaviour
 
         // Submit on Enter while input field is focused (replaces onEndEdit to avoid
         // spurious inference triggers on focus loss)
-        if (!_isProcessing && playerInputField != null && playerInputField.isFocused &&
+        if (!_isProcessing && !_greetingInFlight && playerInputField != null && playerInputField.isFocused &&
             Keyboard.current != null &&
             (Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.numpadEnterKey.wasPressedThisFrame))
         {
